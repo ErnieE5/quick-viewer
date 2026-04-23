@@ -1,6 +1,6 @@
 
 // use ee_conio::cprintln as cprintf;
-use ee_conio::cprintln;
+// use ee_conio::cprintln;
 use std::fmt;
 use std::fmt::{Display,Formatter};
 use std::collections::{HashMap};
@@ -128,7 +128,6 @@ impl ImageList {
                     None    => Err(ImageError::InvalidItemKey)
                 }
             } else {
-                cprintln!("frag 1");
                 Err(ImageError::IndexOverflow)
             }
         }
@@ -143,7 +142,6 @@ impl ImageList {
                 None    => Err(ImageError::InvalidItemKey)
             }
         } else {
-            cprintln!("frag 4: {}",index);
             Err(ImageError::IndexOverflow)
         }
     }
@@ -173,7 +171,6 @@ impl ImageList {
                     None    => Err(ImageError::InvalidItemKey)
                 }
             } else {
-                cprintln!("frag 3");
                 Err(ImageError::IndexOverflow)
             }
         }
