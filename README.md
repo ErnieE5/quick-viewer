@@ -7,5 +7,27 @@
 My intention for this version of the application is to keep it as a foundation for "quickly viewing a directory of images."  I don't want to add too many features beyond that.  This code is likely to become "foundational" in that I'd like to eventually transform it into a crate that I can build on.  As of TODAY (4/24/26) I don't know when that will happen.
 
 
+# Comments
+Just somethings I've been musing on...
+
+I don't like that Iced doesn't support DPI Aware (on Windows) _directly_.  
+This is only a mild annoyance, but does impact my usage of Iced a little when handling very large images.
+
+I am uncertain if Iced will continue to be a foundational UI codebase for any future Rust development. I am concered about future breaking changes that COULD be detrimental to what I wish to do. I generally LIKE how Iced it setup and the foundation Iced is built on is nice.  The amount of "boilerplate" code needed makes sustainabilty potentially a bad thing.  Don't know if anyone has done this, but something "Like" a series of proc_macros to do the basics of "stuff" would be handy.  My thoughts are along the lines of:
+
+This is just the mockup of what I've been considering.  For both sippers and "sub widgets" it would greately increase the ease of implementation thinking about the "download_progress" example.
+```rust
+enum Message{
+    Action1,
+    sipper_message!(Gloink),
+}
+
+fn update ... {
+    sipper_handler!(Gloink)
+}
+
+sipper_body!(Gloink) 
+```
+
 
 
