@@ -645,7 +645,7 @@ impl QuickViewer {
     }
 
     pub fn theme(&self) -> Theme {
-        Theme::TokyoNightStorm
+        Theme::Moonfly
     }
 
 }
