@@ -23,6 +23,9 @@ pub struct Args {
     #[arg(long)]
     pub window_frames: bool,
 
+    #[arg(long)]
+    pub time_forward_loop: bool,
+
 
 }
 

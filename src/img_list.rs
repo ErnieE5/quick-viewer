@@ -5,9 +5,7 @@ use std::fmt;
 use std::fmt::{Display,Formatter};
 use std::ops::{RangeBounds,Bound};
 use std::collections::{HashMap};
-use std::iter::Rev;
 
-use std::num::NonZero;
 use std::num::NonZeroUsize;
 
 use crate::img_traits::{ ImageDyn, ImageError, };
@@ -24,10 +22,24 @@ pub struct ImageList {
 }
 
 
+#[derive(Debug)]
 pub struct PeekWalker {
     pos:    NonZeroUsize,
     total:  NonZeroUsize,
     count:  usize,
+}
+
+impl Display for PeekWalker
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
+    {
+        let p = self.pos;
+        let t = self.total;
+        let c = self.count;
+
+        f.write_fmt(format_args!("{p}/{t} remaining:{c}"))
+    }
+
 }
 
 
@@ -47,7 +59,7 @@ impl Iterator for PeekWalker {
             if self.pos < self.total {
                 self.pos = self.pos.checked_add(1).expect("reality");
             } else {
-                self.pos = NonZero::new(1).expect("one must not be zero");
+                self.pos = NonZeroUsize::new(1).expect("one must not be zero");
             }
 
             self.count-=1;
@@ -128,29 +140,28 @@ impl ImageList {
         R: RangeBounds<isize>
     {
         // For the iterator to just signal None
-        if self.list.is_empty() {
-            let one = NonZero::new(1).expect("reality");
-            return PeekWalker::new( one, one, 0 );
+        let t = match self.total_items() {
+            Ok(i) => i,
+            Err(_) => {
+                let one = NonZeroUsize::new(1).expect("reality");
+                return PeekWalker::new( one, one, 0 );
+            }
         };
+
 
         let s = match r.start_bound() {
-            Bound::Included(i) => *i,
-            Bound::Excluded(e) => { panic!(); },
-            Bound::Unbounded   => 0 , // this
+            Bound::Included(i)  => *i,
+            Bound::Excluded(_e) => { panic!(); },
+            Bound::Unbounded    => 0 , // this
         };
 
-        let mut count = 0;
-        let e = match r.end_bound() {
-            Bound::Included(i) => { count=(i+1)-s; *i+1 },
-            Bound::Excluded(e) => *e,
-            Bound::Unbounded   => 1,  // error
+        let count = match r.end_bound() {
+            Bound::Included(i) => { (i+1)-s },
+            Bound::Excluded(e) => { e-s     },
+            Bound::Unbounded   => 0,  // error
         };
-
-        // ee_conio::cprintln!("\n~[c208] {s} {e} li:{}",self.list_index as isize);
 
         let mut pos = (self.list_index as isize)+s;
-
-        // ee_conio::cprintln!("~[c200] un {pos}");
 
         if pos <= 0 {
             pos = self.list.len() as isize + pos;
@@ -158,21 +169,9 @@ impl ImageList {
             pos = pos-(self.list.len() as isize);
         }
 
-        // ee_conio::cprintln!("~[c204] be {pos}");
-
-
         let pos = NonZeroUsize::new(pos as usize).expect("value must not be zero");
 
-        // Calculate Starting Position
-        // Calculate Steps
-        // ee_conio::cprintln!("~[c227]{pos}  ~[c51]s:{s:?} ~[c77]e:{e:?} count:{count}");
-
-        let t = match self.total_items() {
-            Ok(i) => i,
-            Err(_) => { count=0;  NonZero::new(1).expect("reality") }
-        };
-
-        PeekWalker::new( pos ,t, count.try_into().unwrap()  )
+        PeekWalker::new( pos ,t, count.try_into().unwrap() )
     }
 
 
@@ -212,8 +211,6 @@ impl ImageList {
     }
 
 
-
-
     pub fn item(&self) -> Result<&dyn ImageDyn,ImageError>     {
         if self.list.is_empty() {
             Err(ImageError::NoImages)
@@ -228,7 +225,7 @@ impl ImageList {
         }
     }
 
-    #[allow(unused)]
+
     pub fn item_at(&self, index:NonZeroUsize) -> Result<&dyn ImageDyn,ImageError> {
 
         if self.list.is_empty() {
@@ -248,6 +245,7 @@ impl ImageList {
             None    => Err(ImageError::InvalidItemKey)
         }
     }
+
 
     pub fn is_empty(&self) -> bool { self.list.is_empty() }
 
@@ -269,13 +267,13 @@ impl ImageList {
             return Err(ImageError::NoImages);
         }
 
-        let internal = idx.get()-1;
+        let new_internal = idx.get()-1;
 
-        if internal > self.list.len() {
+        if new_internal > self.list.len() {
             return Err(ImageError::IndexOverflow);
         }
 
-        self.list_index = internal;
+        self.list_index = new_internal;
 
         Ok( self.to_external_index() )
     }
@@ -355,10 +353,10 @@ impl ImageList {
 
     pub fn new() -> ImageList {
         ImageList {
-            store:HashMap::new(),
-            list:Vec::new(),
-            list_index:0,
-            next_key:NonZeroUsize::new(0x10000EE5).expect("math working"),
+            store:      HashMap::new(),
+            list:       Vec::new(),
+            list_index: 0,
+            next_key:   NonZeroUsize::new(0x10000EE5).expect("math working"),
         }
     }
 

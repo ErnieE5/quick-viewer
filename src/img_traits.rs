@@ -6,7 +6,7 @@ pub enum ImageError
     NoImages,
     Uninitialized,
     Unexpected,
-    InvalidIndex,
+    // InvalidIndex,
     InvalidItemKey,
     IndexOverflow,
     ErrorOpeningImageFile(NonZeroUsize),
