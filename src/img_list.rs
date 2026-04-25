@@ -226,6 +226,7 @@ impl ImageList {
     }
 
 
+    #[allow(unused)]
     pub fn item_at(&self, index:NonZeroUsize) -> Result<&dyn ImageDyn,ImageError> {
 
         if self.list.is_empty() {

@@ -239,13 +239,52 @@ impl QuickViewer {
         Task::batch(m)
     }
 
+    fn handle_error(&mut self,key:NonZeroUsize,t:&str,i:&[u8]) -> Task<Message> {
+
+        let path = match self.img_list.item_from_key(key) {
+            Ok(ic) => { ic.fqp().display().to_string() },
+            Err(_) => { String::from("") }
+        };
+        cprintln!("{t} {key:x} {path}");
+
+        self.pending_image_handles.remove(&key);
+        let h = Handle::from_bytes( i.to_vec() );
+        self.cache_image_handle.push(key, h);
+
+        if Some(key) == self.show_when_loaded {
+            let idx = self.img_list.find_index(key).expect("key not found");
+            let _   = self.img_list.goto(idx).expect("key not valid");
+
+            if self.showit() {
+                self.show_when_loaded = None;
+            }
+
+            // if self.args.slideshow {
+            //     self.args.slideshow = false;
+            // }
+
+            return Task::done(Message::Update);
+
+        }
+
+        Task::none()
+    }
+
+
     fn update(&mut self, event: Message, now: Instant) -> Task<Message> {
         self.now = now;
         // cprintln!("~[c7]{:?}    {:40.40}",now-self.start,format!("{:?}",event) );
         match event {
             Message::Noop =>    { Task::none() },
-            Message::Up =>      { Task::none() },
-            Message::Down =>    { Task::none() },
+
+            Message::Up =>      {
+                self.args.delay += 5;
+                Task::none()
+            },
+            Message::Down =>    {
+                self.args.delay -= 5;
+                Task::none()
+            },
 
             Message::RequestAnImage(key) => {
                 // cprintln!("RAI ~[c61]{:x}",key);
@@ -262,37 +301,20 @@ impl QuickViewer {
                 }
             }
 
+            Message::ImageLoaded(Err(ImageError::ErrorOpeningImageFile(key))) => {
+                self.handle_error(key,"ErrorOpeningImageFile",include_bytes!("../assets/open_error.png"))
+            },
+
+            Message::ImageLoaded(Err(ImageError::ErrorReadingImageFile(key))) => {
+                self.handle_error(key,"ErrorReadingImageFile",include_bytes!("../assets/read_error.png"))
+            },
+
+            Message::ImageLoaded(Err(ImageError::ErrorGuessingFormat(key))) => {
+                self.handle_error(key,"ErrorGuessingFormat",include_bytes!("../assets/format_error.png"))
+            },
 
             Message::ImageLoaded(Err(ImageError::ErrorDecodingImage(key))) => {
-
-                let path = match self.img_list.item_from_key(key) {
-                    Ok(ic) => { ic.fqp().display().to_string() },
-                    Err(_) => { String::from("") }
-                };
-                cprintln!("ImageError::ErrorDecodingImage {key:x} {path}");
-
-                self.pending_image_handles.remove(&key);
-                let b = include_bytes!("../assets/decode_error.png");
-                let h = Handle::from_bytes( b.to_vec() );
-                self.cache_image_handle.push(key, h);
-
-                if Some(key) == self.show_when_loaded {
-                    let idx = self.img_list.find_index(key).expect("key not found");
-                    let _   = self.img_list.goto(idx).expect("key not valid");
-
-                    if self.showit() {
-                        self.show_when_loaded = None;
-                    }
-
-                    if self.args.slideshow {
-                        self.args.slideshow = false;
-                    }
-
-                    return Task::done(Message::Update);
-
-                }
-
-                Task::none()
+                self.handle_error(key,"ErrorDecodingImage",include_bytes!("../assets/decode_error.png"))
             },
 
 
@@ -515,12 +537,16 @@ impl QuickViewer {
                 ].spacing(10).padding([0,10])
             } else {
                 // Shows the pending cache load
-                row![ text( format!("{} ",self.pending_image_handles.len()))
-                        .size(8)
-                        .width(iced::Length::Fill)
-                        .height(iced::Length::Fill)
-                        .align_x(text::Alignment::Right)
-                        .align_y(iced::alignment::Vertical::Center)
+                let c = self.pending_image_handles.len();
+                row![
+                    if c > 0 {
+                        text( format!("{} ",c) )
+                               .size(8)
+                               .width(iced::Length::Fill)
+                               .height(iced::Length::Fill)
+                               .align_x(text::Alignment::Right)
+                               .align_y(iced::alignment::Vertical::Center)
+                    } else { text("") }
                 ]
             };
 
@@ -619,7 +645,7 @@ impl QuickViewer {
     }
 
     pub fn theme(&self) -> Theme {
-        Theme::Oxocarbon
+        Theme::TokyoNightStorm
     }
 
 }
