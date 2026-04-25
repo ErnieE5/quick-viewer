@@ -15,6 +15,7 @@ use crate::img_list::{ImageList};
 
 use iced::keyboard;
 use iced::mouse;
+use iced::mouse::{ ScrollDelta };
 use iced::time::Instant;
 // use iced::widget::{ Column, Container, Slider,Image};
 // use iced::Function;
@@ -82,6 +83,7 @@ enum Message {
     Space,
     Quit,
     Sort,
+    Scrolled(iced::mouse::ScrollDelta),
     RandomImage,
     PageDown,
     PageUp,
@@ -453,6 +455,19 @@ impl QuickViewer {
                 self.goto_image( next_image )
             },
 
+            Message::Scrolled(iced::mouse::ScrollDelta::Pixels{x,y}) => { Task::none() }
+            Message::Scrolled(iced::mouse::ScrollDelta::Lines{x,y}) => {
+                if self.show_when_loaded.is_some() {
+                    Task::done(Message::Update)
+                }
+                else
+                {
+                    let delta = -y as isize;
+                    let idx   = self.img_list.peek_range(delta..=delta).next().expect("1");
+                    self.goto_image(idx)
+                }
+            }
+
             Message::Left => {
                 if self.show_when_loaded.is_some() {
                     Task::done(Message::Update)
@@ -577,7 +592,8 @@ impl QuickViewer {
         column![
             mouse_area(canvas(self).width(Fill).height(Fill))
                 .on_press(Message::Left)
-                .on_right_press(Message::Right),
+                .on_right_press(Message::Right)
+                .on_scroll(|delta| { Message::Scrolled(delta) } ),
             container(row![
                 row![ counter],
                 row![ progress_area ]
