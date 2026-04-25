@@ -5,7 +5,7 @@ use crate::img_traits::ImageError;
 use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::{Display,Formatter};
-
+use std::num::NonZeroUsize;
 
 use crate::img_traits::{  ImageDyn, ImageOrigin };
 use std::path::{PathBuf};
@@ -219,27 +219,27 @@ impl FileSystemHelper {
         })
     }
 
-    pub async fn load_image<UserId>(fqp:PathBuf,id: UserId,)
-        -> Result<(UserId, iced::widget::image::Handle), ImageError> {
+    pub async fn load_image(fqp:PathBuf,id: NonZeroUsize)
+        -> Result<(NonZeroUsize, iced::widget::image::Handle), ImageError> {
 
         let mut file = match File::open(&fqp) {
             Ok(f) => f,
-            Err(_e) => { return Err(ImageError::ErrorOpeningImageFile); }
+            Err(_e) => { return Err(ImageError::ErrorOpeningImageFile(id)); }
         };
 
         let mut buffer = Vec::new();
         let Ok(_) = file.read_to_end(&mut buffer) else {
-            return Err(ImageError::ErrorReadingImageFile);
+            return Err(ImageError::ErrorReadingImageFile(id));
         };
 
         let Ok(reader) = ImageReader::new(Cursor::new(buffer)).with_guessed_format() else {
-            return Err(ImageError::ErrorGuessingFormat);
+            return Err(ImageError::ErrorGuessingFormat(id));
         };
 
         let image = match reader.decode() {
             Ok(i) => i,
             Err(_e) => {
-                return Err(ImageError::ErrorDecodingImage);
+                return Err(ImageError::ErrorDecodingImage(id));
             }
         };
 

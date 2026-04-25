@@ -91,8 +91,8 @@ enum Message {
     FullScreenToggle,
     Noop,
 
-    RequestAnImage(usize),
-    ImageLoaded(Result<(usize, Handle), ImageError>),
+    RequestAnImage(NonZeroUsize),
+    ImageLoaded(Result<(NonZeroUsize, Handle), ImageError>),
 
     FindFilesOnPath,
     FoundSomeFiles(SomeFiles),
@@ -111,10 +111,10 @@ pub struct QuickViewer {
     img_list:               ImageList,
 
 
-    show_when_loaded:       Option<usize>,
+    show_when_loaded:       Option<NonZeroUsize>,
     current_image_handle:   Option<Handle>,
-    cache_image_handle:     LruCache<usize, Handle>,
-    pending_image_handles:  HashSet<usize>,
+    cache_image_handle:     LruCache<NonZeroUsize, Handle>,
+    pending_image_handles:  HashSet<NonZeroUsize>,
 
     scan_dir_task:          Option<iced::task::Handle>,
     current_scan_dir:       String,
@@ -160,20 +160,29 @@ impl QuickViewer {
     }
 
     fn showit(&mut self) -> bool {
+        // cprintln!("show it {}",self.img_list);
         let key = match self.img_list.key() {
             Ok(k) => k,
             Err(_) => { return false; } //todo!()
         };
 
+        // cprintln!("{key:x} show it {}",self.img_list);
+
         if self.cache_image_handle.get( &key ).is_some() {
             self.current_image_handle = Some(self.cache_image_handle.get(&key).unwrap().clone());
+            self.show_when_loaded = None;
+            // cprintln!("showed it {key:x}");
             return true;
         }
+
+        // cprintln!("{key:x} NOPE {}",self.img_list);
 
         false
     }
 
-    fn goto_image(&mut self, index:usize) -> Task<Message> {
+    fn goto_image(&mut self, index:NonZeroUsize) -> Task<Message> {
+
+        // cprintln!("{index} GOTO PRE {}",self.img_list);
 
         if self.img_list.is_empty() { return Task::none(); }
 
@@ -182,14 +191,17 @@ impl QuickViewer {
             Err(e)  => { cprintln!("~[c196]{e:?} ~[c255]{index}"); todo!()}
         };
 
+        // cprintln!("{index} DOINK {}",self.img_list);
         match self.img_list.goto(index) {
             Ok(i)   => { assert_eq!(index,i); },
             Err(e)  => { cprintln!("~[c196]{e:?} ~[c255]{index}"); todo!()}
         };
+        // cprintln!("{index} SPLOIK {}",self.img_list);
 
         if self.cache_image_handle.get( &key ).is_some() {
             self.showit();
         } else {
+            // cprintln!("wait for it  {key:x}");
             self.show_when_loaded = Some(key);
         }
 
@@ -205,9 +217,9 @@ impl QuickViewer {
         ];
 
         let mut add_to_batch = |key| {
-
             if self.cache_image_handle.get(&key).is_none() {
                 if self.pending_image_handles.insert(key) {
+                    // cprintln!("{key} {}",self.cache_image_handle.len());
                     m.push(Task::done(Message::RequestAnImage(key)));
                 }
             }
@@ -217,16 +229,11 @@ impl QuickViewer {
 
         match il.key() {
             Ok(k) => add_to_batch(k),
-            Err(_) => todo!(),
+            Err(_) => { },
         };
 
-        for i in il.peek_foreward(10) {
-            match il.key_at(i) {
-                Ok(k) => add_to_batch(k),
-                Err(_) => todo!(),
-            };
-        }
-        for i in il.peek_backward(10) {
+        for i in il.peek_range(-10..=10) {
+            // ee_conio::cprint!("{i}   ");
             match il.key_at(i) {
                 Ok(k) => add_to_batch(k),
                 Err(_) => todo!(),
@@ -238,11 +245,62 @@ impl QuickViewer {
 
     fn update(&mut self, event: Message, now: Instant) -> Task<Message> {
         self.now = now;
-
         match event {
             Message::Noop =>    { Task::none() },
             Message::Up =>      { Task::none() },
             Message::Down =>    { Task::none() },
+
+            Message::RequestAnImage(key) => {
+                // cprintln!("RAI ~[c61]{:x}",key);
+
+                match self.img_list.item_from_key(key) {
+                    Ok(ic) => {
+                        Task::perform(FileSystemHelper::load_image(ic.fqp(), key), Message::ImageLoaded)
+                    },
+
+                    Err(x) => {
+                        cprintln!("~[c197]{x:?}");
+                        Task::none()
+                    }
+                }
+            }
+
+
+            Message::ImageLoaded(Err(ImageError::ErrorDecodingImage(key))) => {
+
+                let path = match self.img_list.item_from_key(key) {
+                    Ok(ic) => { ic.fqp().display().to_string() },
+                    Err(_) => { String::from("") }
+                };
+                cprintln!("ImageError::ErrorDecodingImage {key:x} {path}");
+
+                self.pending_image_handles.remove(&key);
+                let b = include_bytes!("../assets/decode_error.png");
+                let h = Handle::from_bytes( b.to_vec() );
+                self.cache_image_handle.push(key, h);
+
+                if Some(key) == self.show_when_loaded {
+                    let _ = match self.img_list.find_index(key)
+                    {
+                        Ok(i) => match self.img_list.goto(i) { Ok(i) => i, Err(_) => { panic!(); } },
+                        Err(_) => { panic!(); }
+                    };
+
+                    if self.showit() {
+                        self.show_when_loaded = None;
+                    }
+
+                    if self.args.slideshow {
+                        self.args.slideshow = false;
+                    }
+
+                    return Task::done(Message::Update);
+
+                }
+
+                Task::none()
+            },
+
 
             Message::ImageLoaded(Err(e)) => {
                 cprintln!("{:?}",e);
@@ -257,8 +315,8 @@ impl QuickViewer {
 
                     let _ = match self.img_list.find_index(k)
                     {
-                        Ok(i) => match self.img_list.goto(i) { Ok(i) => i, Err(_) => 0 },
-                        Err(_) => { 0 }
+                        Ok(i) => match self.img_list.goto(i) { Ok(i) => i, Err(_) => { panic!(); } },
+                        Err(_) => { panic!(); }
                     };
 
                     if self.showit() {
@@ -274,7 +332,11 @@ impl QuickViewer {
             Message::FoundSomeFiles(p) => {
                 self.current_scan_dir   = p.current_dir;
 
-                if self.img_list.total_items() < 20 {
+                let items = match self.img_list.total_items() {
+                    Ok(i) => i.get(),
+                    Err(_) => { 0 }
+                };
+                if items < 20 {
                     self.img_list.append(p.files);
                     return self.preload();
                 }
@@ -327,27 +389,12 @@ impl QuickViewer {
             }
 
 
-            Message::RequestAnImage(key) => {
-                // cprintln!("RAI ~[c61]{:x}",key);
-
-                match self.img_list.item_from_key(key) {
-                    Ok(ic) => {
-                        Task::perform(FileSystemHelper::load_image(ic.fqp(), key), Message::ImageLoaded)
-                    },
-
-                    Err(x) => {
-                        cprintln!("~[c197]{x:?}");
-                        Task::none()
-                    }
-                }
-            }
-
             Message::Quit => {
                 iced::exit()
             },
 
             Message::Sort => {
-                self.img_list.sort();
+                let _ = self.img_list.sort();
                 self.preload()
             }
 
@@ -355,33 +402,45 @@ impl QuickViewer {
                 if self.show_when_loaded.is_some() {
                     Task::done(Message::Update)
                 } else {
-                    let idx = self.img_list.random();
+                    let idx = match self.img_list.random() {
+                        Ok(i) => i,
+                        Err(_) => { panic!(); }
+                    };
                     self.goto_image( idx )
                 }
             }
 
             Message::PageUp => {
-                Task::none()
+                let idx = self.img_list.peek_range(-100..=-100).next().expect("1");
+                self.goto_image(idx)
             }
 
             Message::PageDown => {
-                Task::none()
+                let idx = self.img_list.peek_range(100..=100).next().expect("1");
+                self.goto_image(idx)
             }
 
             Message::Home => {
-                let next_image = self.img_list.first();
+                let next_image = match self.img_list.first() {
+                    Ok(i) => i,
+                    Err(_) => { panic!(); }
+                };
                 self.goto_image(next_image)
             },
             Message::End => {
-                let next_idx = self.img_list.last();
-                self.goto_image( next_idx )
+                let next_image = match self.img_list.last() {
+                    Ok(i) => i,
+                    Err(_) => { panic!(); }
+                };
+                // cprintln!("thenanny {next_image}");
+                self.goto_image( next_image )
             },
 
             Message::Left => {
                 if self.show_when_loaded.is_some() {
                     Task::done(Message::Update)
                 } else {
-                    let Some(next_idx) = self.img_list.peek_backward(1).next() else {
+                    let Some(next_idx) = self.img_list.peek_range(-1..=-1).next() else {
                         return Task::done(Message::Update);
                     };
 
@@ -394,14 +453,17 @@ impl QuickViewer {
                 if self.show_when_loaded.is_some() {
                     Task::done(Message::Update)
                 } else {
-                    let Some(next_idx) = self.img_list.peek_foreward(1).next() else {
+                    // cprintln!("FRAG {}",self.img_list);
+                    let Some(next_idx) = self.img_list.peek_range(1..=1).next() else {
                         return Task::done(Message::Update);
                     };
 
-                    if next_idx == 1
+                    if next_idx == NonZeroUsize::new(1).expect("reality")
                     {
                         cprintln!("{:?}",now-self.start);
                     }
+
+                    // cprintln!("~[c208]{next_idx}");
 
                     self.goto_image(next_idx)
                 }
@@ -426,8 +488,14 @@ impl QuickViewer {
 
     fn view(&self) -> Element<'_, Message> {
 
-        let c = self.img_list.the_index();
-        let t = self.img_list.total_items();
+        let c = match self.img_list.the_index() {
+            Ok(i) => i.get(),
+            Err(_) => 0
+        };
+        let t = match self.img_list.total_items() {
+            Ok(i) => i.get(),
+            Err(_) => 0
+        };
 
         let fnam = match self.img_list.item() {
             Ok(n) => n.display(),
@@ -629,7 +697,7 @@ impl<Message> Program<Message> for QuickViewer {
 pub fn main() -> iced::Result {
 
     let yy = iced::window::Settings {
-        icon: Some(iced::window::icon::from_file_data(include_bytes!("icon_png"),Some(image::ImageFormat::Png)).expect("1")),
+        icon: Some(iced::window::icon::from_file_data(include_bytes!("../assets/icon_png"),Some(image::ImageFormat::Png)).expect("1")),
         ..iced::window::Settings::default()
     };
 

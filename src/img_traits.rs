@@ -1,16 +1,18 @@
-
+use std::num::NonZeroUsize;
 
 #[derive(Debug,Clone)]
 pub enum ImageError
-{   Uninitialized,
+{
+    NoImages,
+    Uninitialized,
     Unexpected,
     InvalidIndex,
     InvalidItemKey,
     IndexOverflow,
-    ErrorOpeningImageFile,
-    ErrorReadingImageFile,
-    ErrorGuessingFormat,
-    ErrorDecodingImage,
+    ErrorOpeningImageFile(NonZeroUsize),
+    ErrorReadingImageFile(NonZeroUsize),
+    ErrorGuessingFormat(NonZeroUsize),
+    ErrorDecodingImage(NonZeroUsize),
 }
 
 
