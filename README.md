@@ -16,6 +16,8 @@ This is only a mild annoyance, but does impact my usage of Iced a little when ha
 I am uncertain if Iced will continue to be a foundational UI code base for any future Rust development. I am concerned about future breaking changes that COULD be detrimental to what I wish to do. I generally LIKE how Iced it setup and the foundation Iced is built on is nice.  The amount of "boilerplate" code needed makes sustainability potentially a bad thing.  Don't know if anyone has done this, but something "Like" a series of `proc_macros` to do the basics of "stuff" would be handy.  My thoughts are along the lines of:
 
 
+
+
 ```rust
 enum Message {
     Action1,
