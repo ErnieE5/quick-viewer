@@ -5,6 +5,9 @@ mod args;
 mod img_traits;
 mod img_list;
 mod list_files;
+mod toast;
+
+use toast::{Status, Toast};
 
 use crate::list_files::SomeFiles;
 
@@ -23,7 +26,7 @@ use iced::widget::image::Handle;
 use iced::widget::text::Wrapping;
 use iced::widget::{
     // Column,
-    // center,
+    center,
     button,
     // center_x, center_y, checkbox,
     column,
@@ -92,8 +95,10 @@ enum Message {
     End,
     Update,
     FullScreenToggle,
+    ToggleBoggle,
     Noop,
     Goodbye,
+    ByeToaster(usize),
 
     // Flink(iced::task::Handle),
 
@@ -113,8 +118,12 @@ enum Message {
 pub struct QuickViewer {
     args:                   args::Args,
     start:                  Instant,
+    loop_start:             Instant,
     now:                    Instant,
     img_list:               ImageList,
+
+
+    toasts: Vec<Toast>,
 
 
     show_when_loaded:       Option<NonZeroUsize>,
@@ -150,9 +159,18 @@ impl QuickViewer {
 
             args,
 
-            start: Instant::now(),
-            now: Instant::now(),
-            img_list: ImageList::new(),
+
+    toasts: vec![Toast {
+        title: "Here's to ice'd".into(),
+        body: "This is mind-numbing, at times!".into(),
+        status: Status::Danger,
+    }],
+
+
+            start:          Instant::now(),
+            loop_start:     Instant::now(),
+            now:            Instant::now(),
+            img_list:       ImageList::new(),
 
 
             current_image_handle: None,
@@ -293,6 +311,11 @@ impl QuickViewer {
             Message::Noop     =>    { Task::none() },
             Message::Goodbye  =>    { iced::exit() },
 
+            Message::ByeToaster(idx) => {
+                self.toasts.remove(idx);
+                Task::none()
+            },
+
             Message::Up =>      {
                 self.args.delay += 5;
                 Task::none()
@@ -421,17 +444,21 @@ impl QuickViewer {
                 m
             },
 
+            Message::ToggleBoggle => {
+                Task::none()
+            }
+
             Message::FullScreenToggle => {
                 use iced::window;
 
-                let _id = window::latest();
+                let mut m: Vec<Task<Message>> = vec![];
 
-                let (fullscreen, mode) = if self.fullscreen  {
-                    ( false, window::Mode::Windowed )
+                let mode = if self.fullscreen  {
+                    self.fullscreen = false; window::Mode::Windowed
+
                 } else {
-                    ( true, window::Mode::Fullscreen )
+                    self.fullscreen = true;  window::Mode::Fullscreen
                 };
-                self.fullscreen = fullscreen;
 
                 window::latest().and_then(move |id| window::set_mode(id, mode))
             }
@@ -440,7 +467,7 @@ impl QuickViewer {
             Message::Quit => {
                 use iced::window;
 
-                let mut m: Vec<Task<Message>> = vec![
+                let m: Vec<Task<Message>> = vec![
                     window::latest().and_then(move |id| iced::window::minimize(id, true)),
                     Task::done(Message::Goodbye),
                 ];
@@ -553,7 +580,9 @@ impl QuickViewer {
                     if self.args.time_forward_loop {
                         if next_idx == NonZeroUsize::new(1).expect("reality")
                         {
-                            cprintln!("{:?}",now-self.start);
+                            self.toasts[0].body = format!("{:?}",now-self.loop_start);
+                            cprintln!("{:?}",now-self.loop_start);
+                            self.loop_start = Instant::now();
                         }
                     }
 
@@ -650,7 +679,7 @@ impl QuickViewer {
         };
 
 
-        column![
+        let content = column![
             mouse_area(canvas(self).width(Fill).height(Fill))
                 .on_press(Message::Left)
                 .on_right_press(Message::Right)
@@ -661,8 +690,26 @@ impl QuickViewer {
                 row![ progress_area ]
             ]).height(iced::Length::Fixed(15.0))
             .clip(true),
-        ]
+        ];
+
+        let stuff = if true {
+            container( toast::Manager::new(content, &self.toasts, Message::ByeToaster)
+                .timeout(400) )
+        }
+        else {
+            container(content)
+        };
+
+
+        let cc = iced::Color { r:0.0,g:0.0,b:0.0,a:0.0 };
+
+        center(stuff).width(Fill).height(Fill)
+            .style( move |_| container::Style {
+            background: Some(iced::Background::Color(cc)),
+            ..container::Style::default()
+        })
         .into()
+
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -723,8 +770,9 @@ impl QuickViewer {
     }
 
     pub fn theme(&self) -> Theme {
-        // Theme::Moonfly
-        Theme::Ferra
+        Theme::Moonfly
+        // Theme::Oxocarbon
+        // Theme::Ferra
     }
 
 }
@@ -804,6 +852,7 @@ pub fn main() -> iced::Result {
 
     let settings = iced::window::Settings {
         transparent:true,
+        decorations:false,
         icon: Some(iced::window::icon::from_file_data(include_bytes!("../assets/icon_png"),Some(image::ImageFormat::Png)).expect("1")),
         ..iced::window::Settings::default()
     };
@@ -818,5 +867,15 @@ pub fn main() -> iced::Result {
         .title("Quick Viewer")
         .window(settings)
         .centered()
+        .transparent(true)
+        // .style(|_state, _theme| {
+        //     iced::theme::Style {
+        //         background_color:
+        //         iced::Color { r:0.0,g:0.0,b:0.0,a:0.0 },
+        //         text_color: color!(0xefefef),
+        //     }
+
+        // })
         .run()
 }
+
