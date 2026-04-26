@@ -87,7 +87,7 @@ enum Message {
     Quit,
     Sort,
     Swap,
-    Scrolled(iced::mouse::ScrollDelta),
+    Scrolled(ScrollDelta),
     RandomImage,
     PageDown,
     PageUp,
@@ -535,8 +535,8 @@ impl QuickViewer {
                 Task::none()
             }
 
-            Message::Scrolled(iced::mouse::ScrollDelta::Pixels{x: _, y: _}) => { Task::none() }
-            Message::Scrolled(iced::mouse::ScrollDelta::Lines{x,y}) => {
+            Message::Scrolled(ScrollDelta::Pixels{x: _, y: _}) => { Task::none() }
+            Message::Scrolled(ScrollDelta::Lines{x,y}) => {
                 if self.show_when_loaded.is_some() {
                     Task::done(Message::Update)
                 }
@@ -852,7 +852,7 @@ pub fn main() -> iced::Result {
 
     let settings = iced::window::Settings {
         transparent:true,
-        decorations:false,
+        // decorations:false,
         icon: Some(iced::window::icon::from_file_data(include_bytes!("../assets/icon_png"),Some(image::ImageFormat::Png)).expect("1")),
         ..iced::window::Settings::default()
     };
@@ -874,7 +874,6 @@ pub fn main() -> iced::Result {
         //         iced::Color { r:0.0,g:0.0,b:0.0,a:0.0 },
         //         text_color: color!(0xefefef),
         //     }
-
         // })
         .run()
 }

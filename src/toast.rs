@@ -5,13 +5,25 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::overlay;
 use iced::advanced::renderer;
 use iced::advanced::widget::{self, Operation, Tree};
-use iced::advanced::{Shell, Widget, Clipboard};
+use iced::advanced::{
+    // Shell,
+    Widget,
+    Clipboard
+};
 use iced::mouse;
 use iced::time::{self, Duration, Instant};
-use iced::widget::{button, column, container, row, rule, space, text};
+use iced::widget::{
+    // button,
+    column,
+    container,
+    // row, rule, space,
+    text
+};
 use iced::window;
 use iced::{
-    Alignment, Center, Element, Event, Fill, Length, Point, Rectangle, Renderer, Size, Theme,
+    Alignment,
+    // Center,
+    Element, Event, Fill, Length, Point, Rectangle, Renderer, Size, Theme,
     Vector,
 };
 
@@ -99,13 +111,13 @@ where
                     container(text(toast.body.as_str()))
                         .width(Fill)
                         .padding(5)
-                        .style( |a| iced::widget::container::Style {
+                        .style( |_a| iced::widget::container::Style {
                             background: Some( iced::Background::Color( iced::Color {
                                 r:0.1,g:0.1,b:0.1,a:0.5
                             })),
                             text_color: Some( iced::color!(0xefefef).into() ),
                             border: iced_core::border::Border{
-                                color:iced::color!(0xff0000),
+                                color:iced::color!(0xafafaf),
                                 width:1.0,
                                 radius: iced::border::Radius {
                                     top_left: 0.0,
@@ -117,9 +129,9 @@ where
                             },
                             snap: true,
                             shadow: iced::Shadow {
-                                color:  iced::color!(0x000000),
-                                offset: iced::Vector::new(2.0,2.0),
-                                blur_radius: 1.0,
+                                color:  iced::color!(0x1f1f1f),
+                                offset: iced::Vector::new(5.0,5.0),
+                                blur_radius: 10.0,
                             }
 
 

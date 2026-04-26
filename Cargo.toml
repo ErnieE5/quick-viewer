@@ -14,6 +14,7 @@ clap = { version="4.6.1", features=["derive"] }
 dyn-clone = "1.0.20"
 ee-conio = "0.1.0-alpha.2"
 fastrand = "2.4.1"
+heic = { version="0.1.4", features=["parallel"] }
 #iced = { path = "../iced", version = "0.15.0-dev", features = ["image", "canvas", "advanced", "tokio" ,  "sipper"] }
 #iced_core = { path="../iced/core", version="0.15.0-dev" }
 

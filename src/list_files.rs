@@ -143,9 +143,8 @@ pub struct SomeFiles {
 
 static EXTENSIONS: &'static [&'static str] = &[
     "jpg", "jpeg", "png",
-
     "gif", "JPG", "JPEG", "PNG",
-    // "heic", "HEIC",
+    "heic", "HEIC",
     "GIF", "webp"
 ];
 
@@ -222,6 +221,11 @@ impl FileSystemHelper {
     pub async fn load_image(fqp:PathBuf,id: NonZeroUsize)
         -> Result<(NonZeroUsize, iced::widget::image::Handle), ImageError> {
 
+        let ext = match fqp.as_path().extension() {
+            Some(ext) => match ext.to_str() { None => { "" }, Some(ext) => ext, }
+            None => { "" }
+        };
+
         let mut file = match File::open(&fqp) {
             Ok(f) => f,
             Err(_e) => { return Err(ImageError::ErrorOpeningImageFile(id)); }
@@ -232,24 +236,44 @@ impl FileSystemHelper {
             return Err(ImageError::ErrorReadingImageFile(id));
         };
 
-        let Ok(reader) = ImageReader::new(Cursor::new(buffer)).with_guessed_format() else {
-            return Err(ImageError::ErrorGuessingFormat(id));
-        };
 
-        let image = match reader.decode() {
-            Ok(i) => i,
-            Err(_e) => {
-                return Err(ImageError::ErrorDecodingImage(id));
-            }
-        };
+        let (w,h,d) = if ext.eq_ignore_ascii_case("heic") {
 
-        let w = image.width();
-        let h = image.height();
-        let vec = image.to_rgba8().into_raw();
+            use heic::{DecoderConfig, PixelLayout};
+
+            let d = match DecoderConfig::new()
+                .decode(&buffer,PixelLayout::Rgba8) {
+                    Ok(o) => o,
+                    Err(e) => { return Err(ImageError::ErrorDecodingImage(id)); }
+            };
+
+            (d.width,d.height,d.data)
+
+        }
+        else{
+
+            let Ok(reader) = ImageReader::new(Cursor::new(buffer)).with_guessed_format() else {
+                return Err(ImageError::ErrorGuessingFormat(id));
+            };
+
+            let image = match reader.decode() {
+                Ok(i) => i,
+                Err(_e) => {
+                    return Err(ImageError::ErrorDecodingImage(id));
+                }
+            };
+
+            let w = image.width();
+            let h = image.height();
+            let d = image.to_rgba8().into_raw();
+
+            (w,h,d)
+        };
 
         use iced::widget::image::Handle;
-        Ok((id, Handle::from_rgba(w, h, vec)))
+        Ok((id, Handle::from_rgba(w, h, d)))
     }
+
 }
 
 
