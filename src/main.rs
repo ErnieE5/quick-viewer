@@ -83,6 +83,7 @@ enum Message {
     Space,
     Quit,
     Sort,
+    Swap,
     Scrolled(iced::mouse::ScrollDelta),
     RandomImage,
     PageDown,
@@ -92,6 +93,9 @@ enum Message {
     Update,
     FullScreenToggle,
     Noop,
+    Goodbye,
+
+    // Flink(iced::task::Handle),
 
     RequestAnImage(NonZeroUsize),
     ImageLoaded(Result<(NonZeroUsize, Handle), ImageError>),
@@ -121,6 +125,9 @@ pub struct QuickViewer {
     scan_dir_task:          Option<iced::task::Handle>,
     current_scan_dir:       String,
 
+    scale_factor:           f32,
+
+    zoom:bool,
     fullscreen:bool,
 
 }
@@ -135,20 +142,26 @@ fn num<T:ToFormattedString>(n:T) -> String
 
 impl QuickViewer {
     fn default() -> Self {
+        let args = args::do_args();
+
+
         Self {
-            // state:State::Idle,
-            args: args::do_args(),
+            cache_image_handle: LruCache::new(NonZeroUsize::new(args.cache_size).unwrap()),
+
+            args,
+
             start: Instant::now(),
             now: Instant::now(),
             img_list: ImageList::new(),
 
 
             current_image_handle: None,
-            // s: vec![ Scanner::new(1) ],
-            cache_image_handle: LruCache::new(NonZeroUsize::new(30).unwrap()),
+
             show_when_loaded: None,
             pending_image_handles: HashSet::new(),
             scan_dir_task: None,
+            scale_factor: 1.0,
+            zoom:false,
             fullscreen:false,
             current_scan_dir:String::from(""),
         }
@@ -277,7 +290,8 @@ impl QuickViewer {
         self.now = now;
         // cprintln!("~[c7]{:?}    {:40.40}",now-self.start,format!("{:?}",event) );
         match event {
-            Message::Noop =>    { Task::none() },
+            Message::Noop     =>    { Task::none() },
+            Message::Goodbye  =>    { iced::exit() },
 
             Message::Up =>      {
                 self.args.delay += 5;
@@ -288,12 +302,27 @@ impl QuickViewer {
                 Task::none()
             },
 
+            // Message::Flink(h) => {
+            //     cprintln!("~[c51]{}",h.is_aborted());
+            //     h.abort();
+            //     cprintln!("~[c76]{}",h.is_aborted());
+            //     Task::none()
+            // }
+
             Message::RequestAnImage(key) => {
                 // cprintln!("RAI ~[c61]{:x}",key);
 
+
+
                 match self.img_list.item_from_key(key) {
                     Ok(ic) => {
-                        Task::perform(FileSystemHelper::load_image(ic.fqp(), key), Message::ImageLoaded)
+                        let (m,h) = Task::perform(FileSystemHelper::load_image(ic.fqp(), key), Message::ImageLoaded).abortable();
+
+                        // let mut m: Vec<Task<Message>> = vec![m];
+
+                        // h.abort();
+                        m
+                        // Task::batch(m)
                     },
 
                     Err(x) => {
@@ -409,7 +438,14 @@ impl QuickViewer {
 
 
             Message::Quit => {
-                iced::exit()
+                use iced::window;
+
+                let mut m: Vec<Task<Message>> = vec![
+                    window::latest().and_then(move |id| iced::window::minimize(id, true)),
+                    Task::done(Message::Goodbye),
+                ];
+
+                Task::batch(m)
             },
 
             Message::Sort => {
@@ -430,13 +466,25 @@ impl QuickViewer {
             }
 
             Message::PageUp => {
-                let idx = self.img_list.peek_range(-100..=-100).next().expect("1");
-                self.goto_image(idx)
+                if self.show_when_loaded.is_some() {
+                    Task::done(Message::Update)
+                }
+                else
+                {
+                    let idx = self.img_list.peek_range(-100..=-100).next().expect("1");
+                    self.goto_image(idx)
+                }
             }
 
             Message::PageDown => {
-                let idx = self.img_list.peek_range(100..=100).next().expect("1");
-                self.goto_image(idx)
+                if self.show_when_loaded.is_some() {
+                    Task::done(Message::Update)
+                }
+                else
+                {
+                    let idx = self.img_list.peek_range(100..=100).next().expect("1");
+                    self.goto_image(idx)
+                }
             }
 
             Message::Home => {
@@ -455,16 +503,29 @@ impl QuickViewer {
                 self.goto_image( next_image )
             },
 
-            Message::Scrolled(iced::mouse::ScrollDelta::Pixels{x,y}) => { Task::none() }
+            Message::Swap => {
+                self.zoom=!self.zoom;
+                Task::none()
+            }
+
+            Message::Scrolled(iced::mouse::ScrollDelta::Pixels{x: _, y: _}) => { Task::none() }
             Message::Scrolled(iced::mouse::ScrollDelta::Lines{x,y}) => {
                 if self.show_when_loaded.is_some() {
                     Task::done(Message::Update)
                 }
                 else
                 {
-                    let delta = -y as isize;
-                    let idx   = self.img_list.peek_range(delta..=delta).next().expect("1");
-                    self.goto_image(idx)
+                    // cprintln!("{x}x{y}");
+                    if self.zoom {
+                        self.scale_factor = self.scale_factor + y*0.01;
+                        Task::none()
+                    }
+                    else
+                    {
+                        let delta = -y as isize;
+                        let idx   = self.img_list.peek_range(delta..=delta).next().expect("1");
+                        self.goto_image(idx)
+                    }
                 }
             }
 
@@ -593,6 +654,7 @@ impl QuickViewer {
             mouse_area(canvas(self).width(Fill).height(Fill))
                 .on_press(Message::Left)
                 .on_right_press(Message::Right)
+                .on_middle_press(Message::Swap)
                 .on_scroll(|delta| { Message::Scrolled(delta) } ),
             container(row![
                 row![ counter],
@@ -661,19 +723,24 @@ impl QuickViewer {
     }
 
     pub fn theme(&self) -> Theme {
-        Theme::Moonfly
+        // Theme::Moonfly
+        Theme::Ferra
     }
 
 }
 
-fn fit(bounds: Rectangle, w: f32, h: f32) -> Rectangle {
+
+impl QuickViewer {
+
+
+fn fit(&self,bounds: Rectangle, w: f32, h: f32) -> Rectangle {
     let rw = bounds.width / w;
     let rh = bounds.height / h;
 
     let q = if (w * rw).floor() <= bounds.width && (h * rw).floor() <= bounds.height {
-        Size::new(w * rw, h * rw)
+        Size::new(w * rw * self.scale_factor, h * rw * self.scale_factor)
     } else if (w * rh).floor() <= bounds.width && (h * rh).floor() <= bounds.height {
-        Size::new(w * rh, h * rh)
+        Size::new(w * rh * self.scale_factor, h * rh * self.scale_factor)
     } else {
         cprintln!("{w:?} {h:?} {bounds:?} {rw:?} {rh:?}");
         Size::new(0.0, 0.0);
@@ -687,7 +754,7 @@ fn fit(bounds: Rectangle, w: f32, h: f32) -> Rectangle {
 
     Rectangle::new(a, q)
 }
-
+}
 
 impl<Message> Program<Message> for QuickViewer {
     type State = ();
@@ -715,7 +782,7 @@ impl<Message> Program<Message> for QuickViewer {
                 None    => (0.0, 0.0),
             };
 
-            frame.draw_image( fit(bounds, w , h), &han.clone());
+            frame.draw_image( self.fit(bounds, w , h), &han.clone());
         } else {
             // let ll = Point::new(0.0, bounds.height - 15.0 );
 
@@ -736,6 +803,7 @@ impl<Message> Program<Message> for QuickViewer {
 pub fn main() -> iced::Result {
 
     let settings = iced::window::Settings {
+        transparent:true,
         icon: Some(iced::window::icon::from_file_data(include_bytes!("../assets/icon_png"),Some(image::ImageFormat::Png)).expect("1")),
         ..iced::window::Settings::default()
     };

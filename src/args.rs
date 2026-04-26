@@ -11,6 +11,9 @@ pub struct Args {
     #[arg(long, default_value_t=10000)]
     pub max_depth:usize,
 
+    #[arg(long, default_value_t=30)]
+    pub cache_size:usize,
+
     #[arg(long, default_value_t=1000)]
     pub delay: u64,
 
