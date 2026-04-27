@@ -236,39 +236,20 @@ impl FileSystemHelper {
             return Err(ImageError::ErrorReadingImageFile(id));
         };
 
-
-        let (w,h,d) = if ext.eq_ignore_ascii_case("heic") {
-
-            use heic::{DecoderConfig, PixelLayout};
-
-            let d = match DecoderConfig::new()
-                .decode(&buffer,PixelLayout::Rgba8) {
-                    Ok(o) => o,
-                    Err(e) => { return Err(ImageError::ErrorDecodingImage(id)); }
-            };
-
-            (d.width,d.height,d.data)
-
-        }
-        else{
-
-            let Ok(reader) = ImageReader::new(Cursor::new(buffer)).with_guessed_format() else {
-                return Err(ImageError::ErrorGuessingFormat(id));
-            };
-
-            let image = match reader.decode() {
-                Ok(i) => i,
-                Err(_e) => {
-                    return Err(ImageError::ErrorDecodingImage(id));
-                }
-            };
-
-            let w = image.width();
-            let h = image.height();
-            let d = image.to_rgba8().into_raw();
-
-            (w,h,d)
+        let Ok(reader) = ImageReader::new(Cursor::new(buffer)).with_guessed_format() else {
+            return Err(ImageError::ErrorGuessingFormat(id));
         };
+
+        let image = match reader.decode() {
+            Ok(i) => i,
+            Err(_e) => {
+                return Err(ImageError::ErrorDecodingImage(id));
+            }
+        };
+
+        let w = image.width();
+        let h = image.height();
+        let d = image.to_rgba8().into_raw();
 
         use iced::widget::image::Handle;
         Ok((id, Handle::from_rgba(w, h, d)))

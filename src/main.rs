@@ -848,7 +848,11 @@ impl<Message> Program<Message> for QuickViewer {
 }
 
 
+
+
 pub fn main() -> iced::Result {
+    #[cfg(feature = "heif")]
+    libheif_rs::integration::image::register_all_decoding_hooks();
 
     let settings = iced::window::Settings {
         transparent:true,
