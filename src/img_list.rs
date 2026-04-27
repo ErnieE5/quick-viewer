@@ -169,6 +169,10 @@ impl ImageList {
             pos = pos-(self.list.len() as isize);
         }
 
+        if pos <= 0 {
+            pos=1;
+        }
+
         let pos = NonZeroUsize::new(pos as usize).expect("value must not be zero");
 
         PeekWalker::new( pos ,t, count.try_into().unwrap() )
