@@ -847,9 +847,6 @@ impl<Message> Program<Message> for QuickViewer {
         let mut frame = Frame::new(renderer, bounds.size());
 
         if let Some(han) = self.current_image_handle.clone() {
-            use iced::widget::Image;
-
-
             match renderer.load_image(&han) {
                 Ok(_) => {}
                 Err(_) => {
@@ -862,29 +859,15 @@ impl<Message> Program<Message> for QuickViewer {
                 None    => (0.0, 0.0),
             };
 
-            let ii:iced::widget::Image = iced::widget::image::Image::new(han.clone());
-            // let ii = iced::widget::image::Image {
-            //     handle: han.clone(),
-            //     border_radius: border::Radius { top_left:0.0 },
-            //     filter_method,
-            //     rotation: rotation.radians(),
-            //     opacity,
-            // };
-
-
-            // renderer.draw_image(han,self.fit(bounds, w , h),bounds);
-
             frame.draw_image( self.fit(bounds, w , h), &han.clone());
         } else {
-            // let ll = Point::new(0.0, bounds.height - 15.0 );
 
-            // frame.fill_text(Text {
-            //     content: String::from("Loading..."),
-            //     position: ll,
-            //     color: color!(0xF87431),
-            //     size: 15.0.into(),
-            //     ..Text::default()
-            // });
+            let (w, h) = match renderer.measure_image(&self.empty_image) {
+                Some(g) => (g.width as f32, g.height as f32),
+                None    => (0.0, 0.0),
+            };
+
+            frame.draw_image( self.fit(bounds, w , h), &self.empty_image.clone());
         }
 
         vec![frame.into_geometry()]
