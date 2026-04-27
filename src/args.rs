@@ -29,6 +29,9 @@ pub struct Args {
     #[arg(long)]
     pub time_forward_loop: bool,
 
+    #[arg(long)]
+    pub use_image_widget: bool,
+
 
 }
 

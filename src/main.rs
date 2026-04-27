@@ -99,7 +99,6 @@ enum Message {
     Goodbye,
     ByeToaster(usize),
 
-    // Flink(iced::task::Handle),
 
     RequestAnImage(NonZeroUsize),
     ImageLoaded(Result<(NonZeroUsize, Handle), ImageError>),
@@ -139,6 +138,8 @@ pub struct QuickViewer {
     zoom:bool,
     fullscreen:bool,
 
+    empty_image: Handle,
+
 }
 
 
@@ -161,9 +162,9 @@ impl QuickViewer {
 
 
             toasts: vec![
-                Toast { message: "0".into() },
-                Toast { message: "1".into(),},
-                Toast { message: "2".into(),},
+                // Toast { message: "0".into() },
+                // Toast { message: "1".into(),},
+                // Toast { message: "2".into(),},
             ],
 
 
@@ -182,6 +183,29 @@ impl QuickViewer {
             zoom:false,
             fullscreen:false,
             current_scan_dir:String::from(""),
+
+            empty_image: {
+                use image::ImageReader;
+                use std::io::Cursor;
+
+                let Ok(reader) = ImageReader::new(Cursor::new(include_bytes!("../assets/icon.png"))).with_guessed_format() else {
+                    panic!();
+                };
+
+                let image = match reader.decode() {
+                    Ok(i) => i,
+                    Err(_e) => { panic!(); }
+                };
+
+                let w = image.width();
+                let h = image.height();
+                let d = image.to_rgba8().into_raw();
+
+                use iced::widget::image::Handle;
+                Handle::from_rgba(w, h, d)
+
+
+            }
         }
     }
 
@@ -325,12 +349,6 @@ impl QuickViewer {
                 Task::none()
             },
 
-            // Message::Flink(h) => {
-            //     cprintln!("~[c51]{}",h.is_aborted());
-            //     h.abort();
-            //     cprintln!("~[c76]{}",h.is_aborted());
-            //     Task::none()
-            // }
 
             Message::RequestAnImage(key) => {
                 // cprintln!("RAI ~[c61]{:x}",key);
@@ -676,9 +694,22 @@ impl QuickViewer {
             ]
         };
 
+        let h = match self.current_image_handle.clone() {
+            Some(i) => i.clone(),
+            None => { self.empty_image.clone() }
+        };
+
+
+        let img = if self.args.use_image_widget {
+            use iced::widget::image;
+            container(image(h).width(Fill).height(Fill))
+        }
+        else {
+            container(canvas(self).width(Fill).height(Fill))
+        };
 
         let content = column![
-            mouse_area(canvas(self).width(Fill).height(Fill))
+            mouse_area(img)
                 .on_press(Message::Left)
                 .on_right_press(Message::Right)
                 .on_middle_press(Message::Swap)
@@ -816,6 +847,9 @@ impl<Message> Program<Message> for QuickViewer {
         let mut frame = Frame::new(renderer, bounds.size());
 
         if let Some(han) = self.current_image_handle.clone() {
+            use iced::widget::Image;
+
+
             match renderer.load_image(&han) {
                 Ok(_) => {}
                 Err(_) => {
@@ -827,6 +861,18 @@ impl<Message> Program<Message> for QuickViewer {
                 Some(g) => (g.width as f32, g.height as f32),
                 None    => (0.0, 0.0),
             };
+
+            let ii:iced::widget::Image = iced::widget::image::Image::new(han.clone());
+            // let ii = iced::widget::image::Image {
+            //     handle: han.clone(),
+            //     border_radius: border::Radius { top_left:0.0 },
+            //     filter_method,
+            //     rotation: rotation.radians(),
+            //     opacity,
+            // };
+
+
+            // renderer.draw_image(han,self.fit(bounds, w , h),bounds);
 
             frame.draw_image( self.fit(bounds, w , h), &han.clone());
         } else {
@@ -855,7 +901,7 @@ pub fn main() -> iced::Result {
     let settings = iced::window::Settings {
         transparent:true,
         // decorations:false,
-        icon: Some(iced::window::icon::from_file_data(include_bytes!("../assets/icon_png"),Some(image::ImageFormat::Png)).expect("1")),
+        icon: Some(iced::window::icon::from_file_data(include_bytes!("../assets/icon.png"),Some(image::ImageFormat::Png)).expect("1")),
         ..iced::window::Settings::default()
     };
 
