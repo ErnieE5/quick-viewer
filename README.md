@@ -6,6 +6,8 @@
 # Intention
 My intention for this version of the application is to keep it as a foundation for "quickly viewing a directory of images."  I don't want to add too many features beyond that.  This code is likely to become "foundational" in that I'd like to eventually transform it into a crate that I can build on.  As of TODAY (4/24/26) I don't know when that will happen.
 
+The architecture of how Iced applications are constructed is what makes this particular application relatively easy. Overall the baseline application is "nothing to write home about." 
+
 
 # Comments
 Just somethings I've been musing on...

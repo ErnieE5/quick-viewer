@@ -66,10 +66,10 @@ use iced::widget::canvas::{
 };
 
 
-// use iced_core::widget::Widget;
 use iced_core::image::Renderer as CoreRenderer;
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use lru::LruCache;
 use std::num::NonZeroUsize;
@@ -88,6 +88,7 @@ enum Message {
     Sort,
     Swap,
     Scrolled(ScrollDelta),
+    FileDropped(PathBuf),
     RandomImage,
     PageDown,
     PageUp,
@@ -572,6 +573,11 @@ impl QuickViewer {
                 }
             }
 
+            Message::FileDropped(f) => {
+                cprintln!("~[c58]{}",f.display());
+                Task::none()
+            }
+
             Message::Left => {
                 if self.show_when_loaded.is_some() {
                     Task::done(Message::Update)
@@ -785,8 +791,13 @@ impl QuickViewer {
 
         if self.args.window_events {
             s.push( iced::window::events().map(|x| {
-                cprintln!("{x:?}");
-                Message::Noop } ) );
+                match x {
+                    (_,iced::window::Event::FileDropped(x)) => {
+                        Message::FileDropped(x)
+                    },
+                    (_,_) => { Message::Noop }
+                }
+            } ) );
         }
 
         if self.args.window_frames {
