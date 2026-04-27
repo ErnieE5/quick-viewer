@@ -95,7 +95,6 @@ enum Message {
     End,
     Update,
     FullScreenToggle,
-    ToggleBoggle,
     Noop,
     Goodbye,
     ByeToaster(usize),
@@ -117,6 +116,7 @@ enum Message {
 #[derive(Debug)]
 pub struct QuickViewer {
     args:                   args::Args,
+    #[allow(unused)]
     start:                  Instant,
     loop_start:             Instant,
     now:                    Instant,
@@ -160,11 +160,11 @@ impl QuickViewer {
             args,
 
 
-    toasts: vec![Toast {
-        title: "Here's to ice'd".into(),
-        body: "This is mind-numbing, at times!".into(),
-        status: Status::Danger,
-    }],
+            toasts: vec![
+                Toast { message: "0".into() },
+                Toast { message: "1".into(),},
+                Toast { message: "2".into(),},
+            ],
 
 
             start:          Instant::now(),
@@ -339,7 +339,7 @@ impl QuickViewer {
 
                 match self.img_list.item_from_key(key) {
                     Ok(ic) => {
-                        let (m,h) = Task::perform(FileSystemHelper::load_image(ic.fqp(), key), Message::ImageLoaded).abortable();
+                        let (m,_h) = Task::perform(FileSystemHelper::load_image(ic.fqp(), key), Message::ImageLoaded).abortable();
 
                         // let mut m: Vec<Task<Message>> = vec![m];
 
@@ -444,14 +444,10 @@ impl QuickViewer {
                 m
             },
 
-            Message::ToggleBoggle => {
-                Task::none()
-            }
-
             Message::FullScreenToggle => {
                 use iced::window;
 
-                let mut m: Vec<Task<Message>> = vec![];
+                // let mut m: Vec<Task<Message>> = vec![];
 
                 let mode = if self.fullscreen  {
                     self.fullscreen = false; window::Mode::Windowed
@@ -536,7 +532,7 @@ impl QuickViewer {
             }
 
             Message::Scrolled(ScrollDelta::Pixels{x: _, y: _}) => { Task::none() }
-            Message::Scrolled(ScrollDelta::Lines{x,y}) => {
+            Message::Scrolled(ScrollDelta::Lines{x:_,y}) => {
                 if self.show_when_loaded.is_some() {
                     Task::done(Message::Update)
                 }
@@ -553,6 +549,8 @@ impl QuickViewer {
                         let idx   = self.img_list.peek_range(delta..=delta).next().expect("1");
                         self.goto_image(idx)
                     }
+
+
                 }
             }
 
@@ -580,7 +578,7 @@ impl QuickViewer {
                     if self.args.time_forward_loop {
                         if next_idx == NonZeroUsize::new(1).expect("reality")
                         {
-                            self.toasts[0].body = format!("{:?}",now-self.loop_start);
+                            self.toasts[0].message = format!("{:?}",now-self.loop_start);
                             cprintln!("{:?}",now-self.loop_start);
                             self.loop_start = Instant::now();
                         }

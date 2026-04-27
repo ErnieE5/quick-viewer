@@ -16,7 +16,7 @@ use iced::widget::{
     // button,
     column,
     container,
-    // row, rule, space,
+    row, rule, space,
     text
 };
 use iced::window;
@@ -64,9 +64,7 @@ impl fmt::Display for Status {
 
 #[derive(Debug, Clone, Default)]
 pub struct Toast {
-    pub title: String,
-    pub body: String,
-    pub status: Status,
+    pub message: String,
 }
 
 pub struct Manager<'a, Message> {
@@ -88,7 +86,7 @@ where
         let toasts = toasts
             .iter()
             .enumerate()
-            .map(|(index, toast)| {
+            .map(|(_index, toast)| {
                 container(column![
                     // container(
                     //     row![
@@ -107,8 +105,9 @@ where
                     //     Status::Danger => container::danger,
                     //     Status::Warning => container::warning,
                     // }),
-                    // rule::horizontal(0),
-                    container(text(toast.body.as_str()))
+                    space::horizontal().height(100),
+                    // rule::horizontal(5),
+                    container(text(toast.message.as_str()))
                         .width(Fill)
                         .padding(5)
                         .style( |_a| iced::widget::container::Style {
@@ -393,7 +392,7 @@ impl<Message> overlay::Overlay<Message, Theme, Renderer> for Overlay<'_, '_, Mes
 
         let viewport = layout.bounds();
 
-        for (((child, state), layout), instant) in self
+        for (((child, state), layout), _instant) in self
             .toasts
             .iter_mut()
             .zip(self.trees.iter_mut())

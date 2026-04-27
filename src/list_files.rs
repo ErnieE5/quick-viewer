@@ -221,7 +221,7 @@ impl FileSystemHelper {
     pub async fn load_image(fqp:PathBuf,id: NonZeroUsize)
         -> Result<(NonZeroUsize, iced::widget::image::Handle), ImageError> {
 
-        let ext = match fqp.as_path().extension() {
+        let _ext = match fqp.as_path().extension() {
             Some(ext) => match ext.to_str() { None => { "" }, Some(ext) => ext, }
             None => { "" }
         };
