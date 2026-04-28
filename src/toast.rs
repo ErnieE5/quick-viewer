@@ -1,5 +1,5 @@
 
-use std::fmt;
+// use std::fmt;
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::overlay;
@@ -16,7 +16,8 @@ use iced::widget::{
     // button,
     column,
     container,
-    row, rule, space,
+    // row, rule,
+    space,
     text
 };
 use iced::window;
@@ -29,38 +30,38 @@ use iced::{
 
 pub const DEFAULT_TIMEOUT: u64 = 5;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Status {
-    #[default]
-    Primary,
-    Secondary,
-    Success,
-    Danger,
-    Warning,
-}
+// #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+// pub enum Status {
+//     #[default]
+//     Primary,
+//     Secondary,
+//     Success,
+//     Danger,
+//     Warning,
+// }
 
-impl Status {
-    pub const ALL: &'static [Self] = &[
-        Self::Primary,
-        Self::Secondary,
-        Self::Success,
-        Self::Danger,
-        Self::Warning,
-    ];
-}
+// impl Status {
+//     pub const ALL: &'static [Self] = &[
+//         Self::Primary,
+//         Self::Secondary,
+//         Self::Success,
+//         Self::Danger,
+//         Self::Warning,
+//     ];
+// }
 
-impl fmt::Display for Status {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Status::Primary => "Primary",
-            Status::Secondary => "Secondary",
-            Status::Success => "Success",
-            Status::Danger => "Danger",
-            Status::Warning => "Warning",
-        }
-        .fmt(f)
-    }
-}
+// impl fmt::Display for Status {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         match self {
+//             Status::Primary => "Primary",
+//             Status::Secondary => "Secondary",
+//             Status::Success => "Success",
+//             Status::Danger => "Danger",
+//             Status::Warning => "Warning",
+//         }
+//         .fmt(f)
+//     }
+// }
 
 #[derive(Debug, Clone, Default)]
 pub struct Toast {
