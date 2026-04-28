@@ -20,7 +20,7 @@ use std::collections::{VecDeque};
 
 use walkdir::WalkDir;
 
-use iced::widget::image::Handle;
+use iced::widget::image::Handle as ImageHandle;
 
 
 #[derive(Debug, Clone)]
@@ -221,7 +221,7 @@ impl FileSystemHelper {
     }
 
     pub async fn load_image(fqp:PathBuf,id: NonZeroUsize)
-        -> Result<(NonZeroUsize, Handle), ImageError> {
+        -> Result<(NonZeroUsize, ImageHandle), ImageError> {
 
         let _ext = match fqp.as_path().extension() {
             Some(ext) => match ext.to_str() { None => { "" }, Some(ext) => ext, }
@@ -252,7 +252,7 @@ impl FileSystemHelper {
         let width   = image.width();
         let height  = image.height();
         let data    = image.to_rgba8().into_raw();
-        let handle  = Handle::from_rgba(width, height, data);
+        let handle  = ImageHandle::from_rgba(width, height, data);
 
         Ok((id, handle))
     }

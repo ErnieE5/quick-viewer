@@ -21,8 +21,11 @@ use iced::mouse::{ ScrollDelta };
 use iced::time::Instant;
 // use iced::widget::{ Column, Container, Slider,Image};
 // use iced::Function;
-use iced::widget::image::Handle;
+use iced::widget::image::Handle as ImageHandle;
 use iced::widget::text::Wrapping;
+
+use iced_core::image::Handle;
+
 use iced::widget::{
     // Column,
     center,
@@ -89,7 +92,7 @@ enum Message {
     ByeToaster(usize),
 
     RequestAnImage(NonZeroUsize),
-    ImageLoaded( Result<(NonZeroUsize, Handle ), ImageError>),
+    ImageLoaded( Result<(NonZeroUsize, ImageHandle ), ImageError>),
     ImageCached( NonZeroUsize, Result<Allocation,iced::advanced::image::Error> ),
 
     FindFilesOnPath,
@@ -115,9 +118,9 @@ pub struct QuickViewer {
 
 
     show_when_loaded:       Option<NonZeroUsize>,
-    current_image_handle:   Option<Handle>,
+    current_image_handle:   Option<ImageHandle>,
     cache_image_alloc:      LruCache<NonZeroUsize, Allocation>,
-    pending_image_handles:  HashSet<NonZeroUsize>,
+    pending_image_requests:  HashSet<NonZeroUsize>,
 
     scan_dir_task:          Option<iced::task::Handle>,
     current_scan_dir:       String,
@@ -127,7 +130,7 @@ pub struct QuickViewer {
     zoom:bool,
     fullscreen:bool,
 
-    empty_image: Handle,
+    empty_image: ImageHandle,
 
 }
 
@@ -166,7 +169,7 @@ impl QuickViewer {
             current_image_handle: None,
 
             show_when_loaded: None,
-            pending_image_handles: HashSet::new(),
+            pending_image_requests: HashSet::new(),
             scan_dir_task: None,
             scale_factor: 1.0,
             zoom:false,
@@ -190,10 +193,7 @@ impl QuickViewer {
                 let h = image.height();
                 let d = image.to_rgba8().into_raw();
 
-                use iced::widget::image::Handle;
-                Handle::from_rgba(w, h, d)
-
-
+                ImageHandle::from_rgba(w, h, d)
             }
         }
     }
@@ -258,7 +258,7 @@ impl QuickViewer {
         // anticipation that we will want it soon.
         let mut add_to_batch = |key| {
             if self.cache_image_alloc.get(&key).is_none() {
-                if self.pending_image_handles.insert(key) {
+                if self.pending_image_requests.insert(key) {
                     m.push(Task::done(Message::RequestAnImage(key)));
                 }
             }
@@ -293,7 +293,7 @@ impl QuickViewer {
         };
             cprintln!("{t} {key:x} {path}");
 
-        self.pending_image_handles.remove(&key);
+        self.pending_image_requests.remove(&key);
 
         self.current_image_handle = Some( Handle::from_bytes( i.to_vec() ) );
 
@@ -379,17 +379,14 @@ impl QuickViewer {
             },
 
             Message::ImageLoaded(Ok((key,handle))) => {
+                // cprintln!("~[c255]{:?}~[c78]{key:x}  {handle:?}",self.now-self.start);
                 iced::widget::image::allocate(handle).map(move |alloc| { Message::ImageCached(*&key,alloc) } )
             },
 
-            Message::ImageCached( k,Err(e) ) => {
-                cprintln!("Message::ImageCached {k:x} -- {:?}",e);
-                Task::none()
-            }
-
-            Message::ImageCached( k,Ok(er) ) => {
-                self.pending_image_handles.remove(&k);
-                self.cache_image_alloc.push(k, er);
+            Message::ImageCached( k,Ok(a) ) => {
+                // cprintln!("~[c255]{:?},~[c51]{k:x}  {:?}",self.now-self.start,er.handle());
+                self.pending_image_requests.remove(&k);
+                self.cache_image_alloc.push(k, a);
 
                 if Some(k) == self.show_when_loaded {
 
@@ -406,6 +403,12 @@ impl QuickViewer {
 
                 Task::none()
             }
+
+            Message::ImageCached( _k,Err(_e) ) => {
+                // cprintln!("~[c255]{:?},Message::ImageCached {k:x} -- {e:?}",self.now-self.start);
+                Task::none()
+            }
+
 
             Message::FoundSomeFiles(p) => {
                 self.current_scan_dir   = p.current_dir;
@@ -655,7 +658,7 @@ impl QuickViewer {
                 ].spacing(10).padding([0,10])
             } else {
                 // Shows the pending cache load
-                let c = self.pending_image_handles.len();
+                let c = self.pending_image_requests.len();
                 row![
                     if c > 0 {
                         text( format!("{} ",c) )
@@ -697,6 +700,7 @@ impl QuickViewer {
         };
 
         let img = container(iced_image(h).width(Fill).height(Fill));
+        // let img = container(canvas(self).width(Fill).height(Fill));
 
         let content = column![
             mouse_area(img)
@@ -800,6 +804,89 @@ impl QuickViewer {
     }
 
 }
+
+
+// use iced::mouse;
+// use iced::Renderer;
+// use iced::widget::canvas;
+// use iced::widget::canvas::{ Program, Frame };
+
+// use iced::{ Rectangle, Size, Point, };
+// use iced_core::image::Renderer as CoreRenderer;
+
+// impl QuickViewer {
+
+
+//     fn fit(&self,bounds: Rectangle, w: f32, h: f32) -> Rectangle {
+//         let rw = bounds.width / w;
+//         let rh = bounds.height / h;
+
+//         let q = if (w * rw).floor() <= bounds.width && (h * rw).floor() <= bounds.height {
+//             Size::new(w * rw * self.scale_factor, h * rw * self.scale_factor)
+//         } else if (w * rh).floor() <= bounds.width && (h * rh).floor() <= bounds.height {
+//             Size::new(w * rh * self.scale_factor, h * rh * self.scale_factor)
+//         } else {
+//             cprintln!("{w:?} {h:?} {bounds:?} {rw:?} {rh:?}");
+//             Size::new(0.0, 0.0);
+//             todo!();
+//         };
+
+//         let a = Point::new(
+//             (bounds.width - q.width) / 2.0,
+//             (bounds.height - q.height) / 2.0,
+//         );
+
+//         Rectangle::new(a, q)
+//     }
+// }
+
+
+
+
+// impl<Message> Program<Message> for QuickViewer {
+//     type State = ();
+
+//     fn draw(
+//         &self,
+//         _state: &Self::State,
+//         renderer: &Renderer,
+//         _theme: &Theme,
+//         bounds: Rectangle,
+//         _cursor: mouse::Cursor,
+//     ) -> Vec<canvas::Geometry> {
+//         let mut frame = Frame::new(renderer, bounds.size());
+
+//         if let Some(han) = self.current_image_handle.clone() {
+//             // match renderer.load_image(&han) {
+//             //     Ok(_) => {}
+//             //     Err(_) => {
+//             //         todo!();
+//             //     }
+//             // }
+
+//             let (w, h) = match renderer.measure_image(&han) {
+//                 Some(g) => (g.width as f32, g.height as f32),
+//                 None    => (0.0, 0.0),
+//             };
+
+//             frame.draw_image( self.fit(bounds, w , h), &han.clone());
+//         } else {
+
+//             let (w, h) = match renderer.measure_image(&self.empty_image) {
+//                 Some(g) => (g.width as f32, g.height as f32),
+//                 None    => (0.0, 0.0),
+//             };
+
+//             frame.draw_image( self.fit(bounds, w , h), &self.empty_image.clone());
+//         }
+
+//         vec![frame.into_geometry()]
+//     }
+// }
+
+
+
+
 
 
 pub fn main() -> iced::Result {
