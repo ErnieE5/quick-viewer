@@ -17,6 +17,13 @@ pub struct Args {
     #[arg(long, default_value_t=1000)]
     pub delay: u64,
 
+    #[arg(long, alias="fs")]
+    pub fullscreen: bool,
+
+    #[arg(long,short)]
+    pub no_splash: bool,
+
+
     #[arg(long,short)]
     pub slideshow: bool,
 

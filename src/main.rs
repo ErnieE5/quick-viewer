@@ -151,6 +151,7 @@ impl QuickViewer {
 
         Self {
             cache_image_alloc:  LruCache::new(NonZeroUsize::new(args.cache_size).unwrap()),
+            fullscreen:         args.fullscreen,
 
             args,
 
@@ -173,16 +174,14 @@ impl QuickViewer {
             show_when_loaded: None,
             pending_image_requests: HashSet::new(),
             scan_dir_task: None,
-            // scale_factor: viewer::State::new(),
             zoom:false,
-            fullscreen:false,
             current_scan_dir:String::from(""),
 
             empty_image: {
                 use image::ImageReader;
                 use std::io::Cursor;
 
-                let Ok(reader) = ImageReader::new(Cursor::new(include_bytes!("../assets/icon.png"))).with_guessed_format() else {
+                let Ok(reader) = ImageReader::new(Cursor::new(include_bytes!("../assets/jasper.png"))).with_guessed_format() else {
                     panic!();
                 };
 
@@ -201,9 +200,21 @@ impl QuickViewer {
     }
 
     fn new() -> (Self, Task<Message>) {
-        (
-            QuickViewer::default(),
+        let mut m: Vec<Task<Message>> = vec![
             Task::done(Message::FindFilesOnPath)
+        ];
+
+        let mut me = QuickViewer::default();
+
+        if me.fullscreen {
+            me.fullscreen = false;
+            m.push( Task::done(Message::FullScreenToggle));
+        }
+
+
+        (
+            me,
+            Task::batch(m)
         )
     }
 
@@ -556,7 +567,7 @@ impl QuickViewer {
                 }
                 else
                 {
-                    let delta = -y as isize;
+                    let delta:isize = -y as isize;
                     let idx   = self.img_list.peek_range(delta..=delta).next().expect("1");
                     self.goto_image(idx)
                 }
