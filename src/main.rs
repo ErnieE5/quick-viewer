@@ -144,6 +144,34 @@ fn num<T:ToFormattedString>(n:T) -> String
 }
 
 
+macro_rules! whd_from_asset {
+    ($fn:expr) => {
+        {
+            let Ok(reader) = image::ImageReader::new(
+                                std::io::Cursor::new(
+                                    include_bytes!($fn)
+                                )
+                            ).with_guessed_format()
+            else {
+                panic!();
+            };
+
+            let image = match reader.decode() {
+                Ok(i) => i,
+                Err(_e) => { panic!(); }
+            };
+
+            let w = image.width();
+            let h = image.height();
+            let d = image.to_rgba8().into_raw();
+
+            (w,h,d)
+        }
+    }
+}
+
+
+
 impl QuickViewer {
     fn default() -> Self {
         let args = args::do_args();
@@ -153,7 +181,16 @@ impl QuickViewer {
             cache_image_alloc:  LruCache::new(NonZeroUsize::new(args.cache_size).unwrap()),
             fullscreen:         args.fullscreen,
 
-            args,
+            empty_image: {
+                let (w,h,d) = if !args.no_splash {
+                    whd_from_asset!("../assets/jasper.png")
+                }
+                else {
+                    (1,1,vec![0,0,0,0])
+                };
+
+                ImageHandle::from_rgba(w, h, d)
+            },
 
 
             toasts: vec![
@@ -177,25 +214,7 @@ impl QuickViewer {
             zoom:false,
             current_scan_dir:String::from(""),
 
-            empty_image: {
-                use image::ImageReader;
-                use std::io::Cursor;
-
-                let Ok(reader) = ImageReader::new(Cursor::new(include_bytes!("../assets/jasper.png"))).with_guessed_format() else {
-                    panic!();
-                };
-
-                let image = match reader.decode() {
-                    Ok(i) => i,
-                    Err(_e) => { panic!(); }
-                };
-
-                let w = image.width();
-                let h = image.height();
-                let d = image.to_rgba8().into_raw();
-
-                ImageHandle::from_rgba(w, h, d)
-            }
+            args,
         }
     }
 
@@ -704,7 +723,7 @@ impl QuickViewer {
 
         let h = match self.current_image_handle.clone() {
             Some(i) => i.clone(),
-            None => { self.empty_image.clone() }
+            None => self.empty_image.clone()
         };
 
 
