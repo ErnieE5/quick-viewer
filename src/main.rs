@@ -457,7 +457,7 @@ impl QuickViewer {
 
             Message::FindFilesOnPath => {
                 let (m,h) = Task::sip(
-                    FileSystemHelper::find_files_sipper(self.args.dir.to_string(),self.args.max_depth),
+                    FileSystemHelper::find_files_sipper(self.args.dirs.clone(),self.args.max_depth),
                     Message::FoundSomeFiles,
                     | _e | { Message::FileFindComplete }
                 ).abortable();

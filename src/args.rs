@@ -4,10 +4,6 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Args {
-    /// Directory
-     #[arg(default_value_t = String::from("."))]
-    pub dir: String,
-
     #[arg(long, default_value_t=10000)]
     pub max_depth:usize,
 
@@ -17,10 +13,11 @@ pub struct Args {
     #[arg(long, default_value_t=1000)]
     pub delay: u64,
 
-    #[arg(long, alias="fs")]
+    #[arg(long, visible_alias="fs")]
     pub fullscreen: bool,
 
-    #[arg(long,short)]
+    /// Foo AND bar
+    #[arg(long, visible_alias="ns")]
     pub no_splash: bool,
 
 
@@ -41,6 +38,11 @@ pub struct Args {
 
     #[arg(long)]
     pub time_forward_loop: bool,
+
+
+    /// Directory
+     #[arg(value_name="FILES/DIRS", default_values_t = vec![String::from(".")])]
+    pub dirs: Vec<String>,
 
 }
 

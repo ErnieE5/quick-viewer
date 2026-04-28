@@ -154,67 +154,70 @@ type FsiVec = VecDeque<FileSystemImage>;
 
 impl FileSystemHelper {
 
-    pub fn find_files_sipper(dir: String,max_depth:usize) -> impl Straw<(), SomeFiles, ImageError> {
+    pub fn find_files_sipper(items: Vec<String>,max_depth:usize) -> impl Straw<(), SomeFiles, ImageError> {
         sipper(async move |mut progress| {
-            let path = PathBuf::from(&dir);
-            let mut sent:usize = 0;
 
-            let mut drain = async |items:& mut FsiVec| {
-                let mut msg = SomeFiles {
-                    current_dir:    String::from(""),
-                    files:          Vec::<Box<dyn ImageDyn>>::new()
+            for dir in items {
+                let path = PathBuf::from(&dir);
+                let mut sent:usize = 0;
+
+                let mut drain = async |items:& mut FsiVec| {
+                    let mut msg = SomeFiles {
+                        current_dir:    String::from(""),
+                        files:          Vec::<Box<dyn ImageDyn>>::new()
+                    };
+
+                    'r: loop {
+                        match items.pop_front() {
+                            Some(i) => { msg.files.push(Box::new(i)); }
+                            None    => { break 'r; }
+                        }
+                    }
+
+                    match msg.files.last() {
+                        Some(s) => { msg.current_dir = s.set().to_string() },
+                        None    => ()
+                    };
+
+                    progress.send(msg).await;
                 };
 
-                'r: loop {
-                    match items.pop_front() {
-                        Some(i) => { msg.files.push(Box::new(i)); }
-                        None    => { break 'r; }
+                let mut items:FsiVec = VecDeque::new();
+
+                for entry in WalkDir::new(&path)
+                    .max_depth(max_depth)
+                    .into_iter()
+                    .filter_map( |e| { e.ok() } )
+                {
+                    let _size = match entry.metadata() {
+                        Ok(s) => s.len(),
+                        Err(_) => 0
+                    };
+
+                    let ext = match entry.path().extension() {
+                        Some(ext) => match ext.to_str() { None => { continue; }, Some(ext) => ext, }
+                        None => { continue; }
+                    };
+
+                    if !EXTENSIONS.contains( &ext ) {
+                        continue;
+                    }
+
+                    if entry.file_type().is_file() {
+                        match FileSystemImage::new(&path, entry.path().to_path_buf() ) {
+                            Ok(i) => { items.push_back( i ) },
+                            Err(_) => { continue; }
+                        }
+                    }
+
+                    if items.len()> if sent < 10000 { 99 } else { 999 } {
+                        sent += items.len();
+                        drain(& mut items).await;
                     }
                 }
 
-                match msg.files.last() {
-                    Some(s) => { msg.current_dir = s.set().to_string() },
-                    None    => ()
-                };
-
-                progress.send(msg).await;
-            };
-
-            let mut items:FsiVec = VecDeque::new();
-
-            for entry in WalkDir::new(&path)
-                .max_depth(max_depth)
-                .into_iter()
-                .filter_map( |e| { e.ok() } )
-            {
-                let _size = match entry.metadata() {
-                    Ok(s) => s.len(),
-                    Err(_) => 0
-                };
-
-                let ext = match entry.path().extension() {
-                    Some(ext) => match ext.to_str() { None => { continue; }, Some(ext) => ext, }
-                    None => { continue; }
-                };
-
-                if !EXTENSIONS.contains( &ext ) {
-                    continue;
-                }
-
-                if entry.file_type().is_file() {
-                    match FileSystemImage::new(&path, entry.path().to_path_buf() ) {
-                        Ok(i) => { items.push_back( i ) },
-                        Err(_) => { continue; }
-                    }
-                }
-
-                if items.len()> if sent < 10000 { 99 } else { 999 } {
-                    sent += items.len();
-                    drain(& mut items).await;
-                }
+                drain(& mut items).await;
             }
-
-            drain(& mut items).await;
 
             Ok(())
         })
