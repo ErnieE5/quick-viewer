@@ -298,6 +298,22 @@ impl ImageList {
         }
     }
 
+    pub fn shuffle(&mut self) -> Result<(),ImageError> {
+        if self.list.is_empty() {
+            return Err(ImageError::Uninitialized);
+        }
+        let idx = self.list_index;
+        let cur = self.list[idx];
+
+        fastrand::shuffle(&mut self.list);
+
+        self.list_index = match self.list.iter().position(|&i| i==cur) {
+            Some(idx) => idx,
+            None => { return Err(ImageError::Unexpected); }
+        };
+
+        Ok(())
+    }
 
     pub fn sort(&mut self) -> Result<(),ImageError> {
         if self.list.is_empty() {

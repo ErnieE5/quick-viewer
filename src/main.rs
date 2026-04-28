@@ -41,6 +41,7 @@ use iced::widget::{
     row,
     // scrollable, slider, space, span,
     text,
+    image::viewer,
 };
 use iced::{
     // Center, Color,
@@ -77,6 +78,7 @@ enum Message {
     Space,
     Quit,
     Sort,
+    Shuffle,
     Swap,
     Scrolled(ScrollDelta),
     FileDropped(PathBuf),
@@ -125,7 +127,7 @@ pub struct QuickViewer {
     scan_dir_task:          Option<iced::task::Handle>,
     current_scan_dir:       String,
 
-    scale_factor:           f32,
+    // scale_factor:           viewer::State,
 
     zoom:bool,
     fullscreen:bool,
@@ -171,7 +173,7 @@ impl QuickViewer {
             show_when_loaded: None,
             pending_image_requests: HashSet::new(),
             scan_dir_task: None,
-            scale_factor: 1.0,
+            // scale_factor: viewer::State::new(),
             zoom:false,
             fullscreen:false,
             current_scan_dir:String::from(""),
@@ -275,7 +277,7 @@ impl QuickViewer {
         // MOST of the time the only item that NEEDS preload will be either
         // -10 back or 10 forward depending on the direction moved when cycling
         // images 1 by one.  All other just get ignored in the batching routine.
-        for i in il.peek_range(-10..=10) {
+        for i in il.peek_range(-1*self.args.look_behind..=self.args.look_ahead) {
             match il.key_at(i) {
                 Ok(k) => add_to_batch(k),
                 Err(_) => todo!(),
@@ -379,12 +381,11 @@ impl QuickViewer {
             },
 
             Message::ImageLoaded(Ok((key,handle))) => {
-                // cprintln!("~[c255]{:?}~[c78]{key:x}  {handle:?}",self.now-self.start);
                 iced::widget::image::allocate(handle).map(move |alloc| { Message::ImageCached(*&key,alloc) } )
             },
 
             Message::ImageCached( k,Ok(a) ) => {
-                // cprintln!("~[c255]{:?},~[c51]{k:x}  {:?}",self.now-self.start,er.handle());
+                // cprintln!("~[c255]{:?},~[c51]{k:x}  {:?}",self.now-self.start,a.handle());
                 self.pending_image_requests.remove(&k);
                 self.cache_image_alloc.push(k, a);
 
@@ -487,6 +488,12 @@ impl QuickViewer {
                 self.preload()
             }
 
+            Message::Shuffle => {
+                let _ = self.img_list.shuffle();
+                self.preload()
+            }
+
+
             Message::RandomImage => {
                 if self.show_when_loaded.is_some() {
                     Task::done(Message::Update)
@@ -549,19 +556,9 @@ impl QuickViewer {
                 }
                 else
                 {
-                    // cprintln!("{x}x{y}");
-                    if self.zoom {
-                        self.scale_factor = self.scale_factor + y*0.01;
-                        Task::none()
-                    }
-                    else
-                    {
-                        let delta = -y as isize;
-                        let idx   = self.img_list.peek_range(delta..=delta).next().expect("1");
-                        self.goto_image(idx)
-                    }
-
-
+                    let delta = -y as isize;
+                    let idx   = self.img_list.peek_range(delta..=delta).next().expect("1");
+                    self.goto_image(idx)
                 }
             }
 
@@ -699,7 +696,17 @@ impl QuickViewer {
             None => { self.empty_image.clone() }
         };
 
-        let img = container(iced_image(h).width(Fill).height(Fill));
+
+        let img = if self.zoom {
+            container(viewer(h)
+                // .scale_step(0.10)
+                // .content_fit(iced::ContentFit::Contain)
+                .width(Fill)
+                .height(Fill))
+        }
+        else {
+            container(iced_image(h).width(Fill).height(Fill))
+        };
         // let img = container(canvas(self).width(Fill).height(Fill));
 
         let content = column![
@@ -762,6 +769,7 @@ impl QuickViewer {
                     "f" => Some(Message::FullScreenToggle),
                     "q" => Some(Message::Quit),
                     "s" => Some(Message::Sort),
+                    "h" => Some(Message::Shuffle),
                     "r" => Some(Message::RandomImage),
                     // a   => { cprintln!("{a}"); None }
                     _   => None,

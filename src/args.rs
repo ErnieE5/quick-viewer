@@ -26,6 +26,12 @@ pub struct Args {
     #[arg(long)]
     pub window_frames: bool,
 
+    #[arg(long, default_value_t=10)]
+    pub look_ahead: isize,
+    #[arg(long, default_value_t=10)]
+    pub look_behind: isize,
+
+
     #[arg(long)]
     pub time_forward_loop: bool,
 
