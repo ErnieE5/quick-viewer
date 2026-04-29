@@ -17,7 +17,7 @@ pub struct Args {
     pub slideshow: bool,
 
     /// delay to advance a slideshow
-    #[arg(long, default_value_t=1000)]
+    #[arg(long, default_value_t=1000, value_parser=clap::value_parser!(u64).range(crate::MIN_DELAY..86_400_00))]
     pub delay: u64,
 
 
