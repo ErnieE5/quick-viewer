@@ -106,7 +106,7 @@ where
                     //     Status::Danger => container::danger,
                     //     Status::Warning => container::warning,
                     // }),
-                    space::horizontal().height(100),
+                    space::horizontal().height(1),
                     // rule::horizontal(5),
                     container(text(toast.message.as_str()))
                         .width(Fill)
