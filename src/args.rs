@@ -13,7 +13,7 @@ pub struct Args {
     pub fullscreen: bool,
 
     /// start in slideshow mode
-    #[arg(long,short)]
+    #[arg(long,short='S',)]
     pub slideshow: bool,
 
     /// delay to advance a slideshow in milliseconds

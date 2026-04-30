@@ -33,6 +33,7 @@ use std::hash::{Hash, Hasher};
 use iced::widget::{
     // Column,
     // text::Catalog,
+    progress_bar,
     Theme,
     float,
     stack,
@@ -800,15 +801,25 @@ impl QuickViewer {
             } else {
                 // Shows the pending cache load
                 let c = self.pending_image_requests.len();
+                let b = (self.args.look_ahead + self.args.look_behind) as f32;
                 row![
-                    if c > 0 {
-                        text( format!("{} ",c) )
-                               .size(8)
-                               .width(iced::Length::Fill)
-                               .height(iced::Length::Fill)
-                               .align_x(text::Alignment::Right)
-                               .align_y(iced::alignment::Vertical::Center)
-                    } else { text("") }
+                    container(
+                        progress_bar(0.0..=b,b-c as f32)
+                        .length(50)
+                        .style( |theme:&Theme| {
+                            use iced::{ border, Background };
+                            use iced::widget::progress_bar::Style;
+                            let t = theme.palette();
+
+                            Style{
+                                background: Background::Color(t.primary ),
+                                bar:        Background::Color(t.background ),
+                                border:     border::color(t.background).width(5.5),
+                            }
+                        } )
+                    )
+                    .width(Length::Fill)
+                    .align_x(text::Alignment::Right),
                 ]
             };
 
@@ -847,12 +858,10 @@ impl QuickViewer {
                                     Err(e) => format!("{:?}",e)
                                 };
 
-                                text!("{:x} {}",item.1.key,ii)
+                                text!("  {:x} {}  ",item.1.key,ii)
                                     .font(Font::MONOSPACE)
                                     .into()
                             })
-
-
                         )
                     )
                     .style( |_| {
@@ -869,7 +878,7 @@ impl QuickViewer {
             }
             else
             {
-                container( text("idle") )
+                container( text("  idle  ") )
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .align_y(iced::alignment::Vertical::Bottom)
@@ -886,7 +895,6 @@ impl QuickViewer {
             None => self.empty_image.clone()
         };
 
-
         let img = if self.zoom {
             container(viewer(h).width(Fill).height(Fill))
         }
@@ -902,11 +910,7 @@ impl QuickViewer {
         // let img = container(canvas(self).width(Fill).height(Fill));
 
         let content = column![
-            mouse_area(img)
-                .on_press(Message::Left)
-                .on_right_press(Message::Right)
-                .on_middle_press(Message::Swap)
-                .on_scroll(|delta| { Message::Scrolled(delta) } ),
+            img,
             container(row![
                 row![ counter],
                 row![ progress_area ]
@@ -923,15 +927,14 @@ impl QuickViewer {
         };
 
 
-        let cc = iced::Color { r:0.0,g:0.0,b:0.0,a:0.0 };
-
-        center(stuff).width(Fill).height(Fill)
-            .style( move |_| container::Style {
-            background: Some(iced::Background::Color(cc)),
-            ..container::Style::default()
-        })
+        mouse_area(
+            center(stuff).width(Fill).height(Fill)
+        )
+        .on_press(Message::Left)
+        .on_right_press(Message::Right)
+        .on_middle_press(Message::Swap)
+        .on_scroll(|delta| { Message::Scrolled(delta) } )
         .into()
-
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -1038,8 +1041,8 @@ impl QuickViewer {
     }
 
     pub fn theme(&self) -> Theme {
-        Theme::Moonfly
-        // Theme::Oxocarbon
+        // Theme::Moonfly
+        Theme::Oxocarbon
         // Theme::Ferra
     }
 
