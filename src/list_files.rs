@@ -241,6 +241,7 @@ impl FileSystemHelper {
         };
         let open = open.elapsed();
 
+        tokio::task::yield_now().await;
 
         let read = Instant::now();
         let mut buffer = Vec::new();
@@ -248,6 +249,8 @@ impl FileSystemHelper {
             return Err(ImageError::ErrorReadingImageFile(id));
         };
         let read = read.elapsed();
+
+        tokio::task::yield_now().await;
 
         let decode = Instant::now();
         let Ok(reader) = ImageReader::new(Cursor::new(buffer)).with_guessed_format() else {
@@ -261,6 +264,8 @@ impl FileSystemHelper {
             }
         };
         let decode = decode.elapsed();
+
+        tokio::task::yield_now().await;
 
         let width   = image.width();
         let height  = image.height();

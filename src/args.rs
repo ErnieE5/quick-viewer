@@ -46,6 +46,10 @@ pub struct Args {
     #[arg(long)]
     pub window_frames: bool,
 
+    #[arg(long)]
+    pub view_cache_look_ahead:bool,
+
+
     /// Cache look ahead
     #[arg(long, default_value_t=10)]
     pub look_ahead: isize,

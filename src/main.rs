@@ -26,15 +26,22 @@ use iced::time::Instant;
 use iced::widget::image::Handle as ImageHandle;
 use iced::widget::text::Wrapping;
 
-use iced_core::image::Handle;
+use iced::task::Handle as TaskHandle;
+
+use std::hash::{Hash, Hasher};
 
 use iced::widget::{
     // Column,
+    // text::Catalog,
+    Theme,
+    float,
+    stack,
     center,
     button,
     // center_x, center_y, checkbox,
     column,
     container,
+    container::Style as CStyle,
     // text_input, toggler,
     mouse_area,
     image as iced_image,
@@ -48,6 +55,7 @@ use iced::widget::{
 use iced::{
     // Center, Color,
     Element,
+    Length,
     Fill,
     Font,
     // Point,
@@ -58,17 +66,17 @@ use iced::{
     // Size,
     Subscription,
     Task,
-    Theme,
     color,
 };
 
-use std::collections::HashSet;
+use std::collections::{ HashMap };
 use std::path::PathBuf;
 
 use lru::LruCache;
-use std::num::NonZeroUsize;
+use std::num::NonZeroUsize as ImageKey;
 
-use iced::advanced::image::Allocation;
+use iced::advanced::image::Allocation as ImageAllocation;
+use iced::advanced::image::Error      as AllocError;
 
 
 #[derive(Debug, Clone)]
@@ -98,9 +106,9 @@ enum Message {
     Goodbye,
     ByeToaster(usize),
 
-    RequestAnImage(NonZeroUsize),
+    RequestAnImage(ImageKey),
     ImageLoaded( Result<LoadData, ImageError>),
-    ImageCached( NonZeroUsize, Result<Allocation,iced::advanced::image::Error> ),
+    ImageCached( ImageKey, Result<ImageAllocation,AllocError> ),
 
     FindFilesOnPath,
     FoundSomeFiles(SomeFiles),
@@ -109,6 +117,44 @@ enum Message {
 
 
 }
+
+
+
+#[derive(Debug,Clone)]
+#[allow(unused)]
+pub struct CacheData {
+    pub key:        ImageKey,
+    pub request:    Option<TaskHandle>,
+    pub alloc:      Option<ImageAllocation>,
+}
+
+impl CacheData {
+    pub fn new(key:ImageKey) -> CacheData {
+        CacheData {
+            key,
+            request:    None,
+            alloc:      None,
+
+        }
+    }
+}
+
+impl PartialEq for CacheData {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
+impl Eq for CacheData {}
+
+impl Hash for CacheData {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.key.hash(state);
+    }
+}
+
+
+
 
 
 #[derive(Debug)]
@@ -124,12 +170,12 @@ pub struct QuickViewer {
     toasts: Vec<Toast>,
 
 
-    show_when_loaded:       Option<NonZeroUsize>,
-    current_image_handle:   Option<ImageHandle>,
-    cache_image_alloc:      LruCache<NonZeroUsize, Allocation>,
-    pending_image_requests:  HashSet<NonZeroUsize>,
+    show_when_loaded:           Option<ImageKey>,
+    current_image_handle:       Option<ImageHandle>,
+    cache_image_alloc:          LruCache<ImageKey, ImageAllocation>,
+    pending_image_requests:     HashMap<ImageKey,CacheData>,
 
-    scan_dir_task:          Option<iced::task::Handle>,
+    scan_dir_task:          Option<TaskHandle>,
     current_scan_dir:       String,
 
     // scale_factor:           viewer::State,
@@ -183,7 +229,7 @@ impl QuickViewer {
 
 
         Self {
-            cache_image_alloc:  LruCache::new(NonZeroUsize::new(args.cache_size).unwrap()),
+            cache_image_alloc:  LruCache::new(ImageKey::new(args.cache_size).unwrap()),
             fullscreen:         args.fullscreen,
 
             empty_image: {
@@ -213,7 +259,7 @@ impl QuickViewer {
             current_image_handle: None,
 
             show_when_loaded: None,
-            pending_image_requests: HashSet::new(),
+            pending_image_requests: HashMap::new(),
             scan_dir_task: None,
             zoom:false,
             current_scan_dir:String::from(""),
@@ -253,14 +299,13 @@ impl QuickViewer {
                 if Some(h.handle()) != self.current_image_handle.as_ref() {
                     self.current_image_handle = Some(h.handle().clone());
                     self.show_when_loaded = None;
-                    true
                 }
-                else { false }
+                true
             }
         }
     }
 
-    fn goto_image_task(&mut self, index:NonZeroUsize) -> Task<Message> {
+    fn goto_image_task(&mut self, index:ImageKey) -> Task<Message> {
         if self.img_list.is_empty() { return Task::none(); }
 
         let key = match self.img_list.key_at(index) {
@@ -274,13 +319,14 @@ impl QuickViewer {
         };
 
         if !self.showit() {
+            // cprintln!("Zzzzzz ~[c255]{key} ~[c51]{:?}",self.now-self.start);
             self.show_when_loaded = Some(key);
         }
 
-        self.preload_task()
+        self.preload_task(false)
     }
 
-    fn preload_task(&mut self) -> Task<Message> {
+    fn preload_task(&mut self,only_one:bool) -> Task<Message> {
 
         if self.img_list.is_empty() { return Task::none(); }
 
@@ -290,8 +336,15 @@ impl QuickViewer {
         // anticipation that we will want it soon.
         let mut add_to_batch = |key| {
             if self.cache_image_alloc.get(&key).is_none() {
-                if self.pending_image_requests.insert(key) {
-                    m.push(Task::done(Message::RequestAnImage(key)));
+                match self.pending_image_requests.get(&key) {
+                    None => {
+                        match self.pending_image_requests.insert(key,CacheData::new(key)) {
+                            None => { m.push(Task::done(Message::RequestAnImage(key))); }
+                            Some(_) => { panic!(); }
+                        }
+                    },
+                    Some(_) => { }
+
                 }
             }
         };
@@ -304,20 +357,22 @@ impl QuickViewer {
             Err(_) => { },
         };
 
-        // MOST of the time the only item that NEEDS preload will be either
-        // -10 back or 10 forward depending on the direction moved when cycling
-        // images 1 by one.  All other just get ignored in the batching routine.
-        for i in il.peek_range(-1*self.args.look_behind..=self.args.look_ahead) {
-            match il.key_at(i) {
-                Ok(k) => add_to_batch(k),
-                Err(_) => todo!(),
-            };
+        if !only_one {
+            // MOST of the time the only item that NEEDS preload will be either
+            // -10 back or 10 forward depending on the direction moved when cycling
+            // images 1 by one.  All other just get ignored in the batching routine.
+            for i in il.peek_range(-1*self.args.look_behind..=self.args.look_ahead) {
+                match il.key_at(i) {
+                    Ok(k) => add_to_batch(k),
+                    Err(_) => todo!(),
+                };
+            }
         }
 
         Task::batch(m)
     }
 
-    fn handle_error_task(&mut self,key:NonZeroUsize,t:&str,i:&[u8]) -> Task<Message> {
+    fn handle_error_task(&mut self,key:ImageKey,t:&str,i:&[u8]) -> Task<Message> {
 
         let path = match self.img_list.item_from_key(key) {
             Ok(ic) => { ic.fqp().display().to_string() },
@@ -326,9 +381,12 @@ impl QuickViewer {
 
         cprintln!("{t} {key:#?} {path}");
 
-        self.pending_image_requests.remove(&key);
+        let Some(_) = self.pending_image_requests.remove(&key) else {
+            cprintln!("um");
+            return Task::none();
+        };
 
-        self.current_image_handle = Some( Handle::from_bytes( i.to_vec() ) );
+        self.current_image_handle = Some( ImageHandle::from_bytes( i.to_vec() ) );
 
         if Some(key) == self.show_when_loaded {
             let idx = self.img_list.find_index(key).expect("key not found");
@@ -403,10 +461,16 @@ impl QuickViewer {
             Message::RequestAnImage(key) => {
                 // cprintln!("RAI ~[c61]{:x}",key);
 
+                let Some(r) = self.pending_image_requests.get_mut(&key) else {
+                    return Task::none();
+                };
+
                 match self.img_list.item_from_key(key) {
                     Ok(ic) => {
-                        let (m,_h) = Task::perform(FileSystemHelper::load_image(ic.fqp(), key), Message::ImageLoaded).abortable();
-                        // TODO ???
+                        let (m,h) = Task::perform(FileSystemHelper::load_image(ic.fqp(), key), Message::ImageLoaded).abortable();
+
+                        r.request = Some(h.abort_on_drop());
+
                         m
                     },
 
@@ -446,7 +510,12 @@ impl QuickViewer {
 
             Message::ImageCached(k,Ok(a) ) => {
                 // cprintln!("~[c255]{:?},~[c51]{k:x}  {:?}",self.now-self.start,a.handle());
-                self.pending_image_requests.remove(&k);
+                let Some(_) = self.pending_image_requests.remove(&k) else {
+                    // cprintln!("{k} missed   ");
+                    return Task::none();
+                };
+
+
                 self.cache_image_alloc.push(k, a);
 
                 if Some(k) == self.show_when_loaded {
@@ -493,7 +562,7 @@ impl QuickViewer {
             },
             Message::FileFindComplete => {
                 self.scan_dir_task = None;
-                return self.preload_task();
+                return self.preload_task(false);
             },
 
             Message::CancelFileFind => {
@@ -504,7 +573,7 @@ impl QuickViewer {
                         self.scan_dir_task = None;
                     }
                 }
-                return self.preload_task();
+                return self.preload_task(false);
             },
 
 
@@ -549,12 +618,14 @@ impl QuickViewer {
 
             Message::Sort => {
                 let _ = self.img_list.sort();
-                self.preload_task()
+                self.preload_task(false)
             }
 
             Message::Shuffle => {
                 let _ = self.img_list.shuffle();
-                self.preload_task()
+
+                self.pending_image_requests.drain();
+                self.preload_task(false)
             }
 
 
@@ -566,6 +637,7 @@ impl QuickViewer {
                         Ok(i) => i,
                         Err(_) => { panic!(); }
                     };
+                    self.pending_image_requests.drain();
                     self.goto_image_task( idx )
                 }
             }
@@ -577,6 +649,8 @@ impl QuickViewer {
                 else
                 {
                     let idx = self.img_list.peek_range(-100..=-100).next().expect("1");
+
+                    self.pending_image_requests.drain();
                     self.goto_image_task(idx)
                 }
             }
@@ -588,6 +662,8 @@ impl QuickViewer {
                 else
                 {
                     let idx = self.img_list.peek_range(100..=100).next().expect("1");
+
+                    self.pending_image_requests.drain();
                     self.goto_image_task(idx)
                 }
             }
@@ -597,6 +673,8 @@ impl QuickViewer {
                     Ok(i) => i,
                     Err(_) => { panic!(); }
                 };
+
+                self.pending_image_requests.drain();
                 self.goto_image_task(next_image)
             },
 
@@ -606,6 +684,7 @@ impl QuickViewer {
                     Err(_) => { panic!(); }
                 };
 
+                self.pending_image_requests.drain();
                 self.goto_image_task( next_image )
             },
 
@@ -623,6 +702,7 @@ impl QuickViewer {
                 {
                     let delta:isize = -y as isize;
                     let idx   = self.img_list.peek_range(delta..=delta).next().expect("1");
+                    self.pending_image_requests.drain();
                     self.goto_image_task(idx)
                 }
             }
@@ -654,7 +734,7 @@ impl QuickViewer {
                     };
 
                     if self.args.time_forward_loop {
-                        if next_idx == NonZeroUsize::new(1).expect("reality")
+                        if next_idx == ImageKey::new(1).expect("reality")
                         {
                             if !self.toasts.is_empty() {
                                 self.toasts[0].message = format!("{:?}",now-self.loop_start);
@@ -748,6 +828,52 @@ impl QuickViewer {
             ]
         };
 
+
+        let dbg = if self.args.view_cache_look_ahead {
+            if self.pending_image_requests.len() > 0 {
+                container(
+                    container(
+                        column(
+                            self.pending_image_requests.iter().map(|item| {
+                                let ii = match self.img_list.item_from_key(item.1.key) {
+                                    Ok(i) => format!("{i}"),
+                                    Err(e) => format!("{:?}",e)
+                                };
+
+                                text!("{:x} {}",item.1.key,ii)
+                                    .font(Font::MONOSPACE)
+                                    .into()
+                            })
+
+
+                        )
+                    )
+                    .style( |_| {
+                        CStyle {
+                            background: Some(iced::Background::Color(iced::Color::from_rgba8(0, 0, 0,0.25))),
+                            ..CStyle::default()
+                        }
+                    })
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(iced::alignment::Vertical::Bottom)
+                .align_x(iced::alignment::Horizontal::Right)
+            }
+            else
+            {
+                container( text("idle") )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_y(iced::alignment::Vertical::Bottom)
+                .align_x(iced::alignment::Horizontal::Right)
+
+            } }
+        else
+        {
+            container(row![])
+        };
+
         let h = match self.current_image_handle.clone() {
             Some(i) => i.clone(),
             None => self.empty_image.clone()
@@ -755,14 +881,16 @@ impl QuickViewer {
 
 
         let img = if self.zoom {
-            container(viewer(h)
-                // .scale_step(0.10)
-                // .content_fit(iced::ContentFit::Contain)
-                .width(Fill)
-                .height(Fill))
+            container(viewer(h).width(Fill).height(Fill))
         }
         else {
-            container(iced_image(h).width(Fill).height(Fill))
+            container(
+                stack![
+                    iced_image(h).width(Fill).height(Fill),
+                    float( dbg ),
+
+                ].width(Fill).height(Fill)
+            )
         };
         // let img = container(canvas(self).width(Fill).height(Fill));
 
