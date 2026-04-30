@@ -9,7 +9,7 @@ use clap::Parser;
 pub struct Args {
 
     /// start full screen
-    #[arg(long, visible_alias="fs")]
+    #[arg(long, short='F', visible_alias="fs")]
     pub fullscreen: bool,
 
     /// start in slideshow mode

@@ -89,6 +89,8 @@ enum Message {
     DecDelay,
     IncDelay,
 
+    LookAheadDisplayToggle,
+
     Space,
     Quit,
     Sort,
@@ -415,6 +417,11 @@ impl QuickViewer {
 
             Message::ByeToaster(idx) => {
                 self.toasts.remove(idx);
+                Task::none()
+            },
+
+            Message::LookAheadDisplayToggle => {
+                self.args.view_cache_look_ahead = !self.args.view_cache_look_ahead;
                 Task::none()
             },
 
@@ -934,7 +941,9 @@ impl QuickViewer {
 
 
         let mut s = vec![
-            keyboard::listen().filter_map(|event| match event {
+            keyboard::listen().filter_map(|event|
+
+            match event {
                 EV::KeyPressed { key: KK::Named(key), ..} => match key {
 
                     // KN::ArrowUp      => Some(Message::Up),
@@ -948,10 +957,18 @@ impl QuickViewer {
                     KN::End          => Some(Message::End),
                     KN::Escape       => Some(Message::Quit),
                     KN::F11          => Some(Message::FullScreenToggle),
-                    // a  => { cprintln!("{a:?}"); None }
+                    // KN::Alt          => { cprintln!("{:?}",event); None },
+                    // a  => { cprintln!("~[c197]{a:?}"); None }
                     _ => None,
                 },
-                EV::KeyPressed { key: KK::Character(key), ..} => match key.as_ref() {
+
+
+                EV::KeyPressed { text: Some(ref v), modifiers,.. }
+                    if  modifiers == keyboard::Modifiers::SHIFT ||
+                        modifiers == keyboard::Modifiers::NONE      => match v.as_ref() {
+                    "A" => { cprintln!("A"); None },
+                    "!" => { cprintln!("!"); None },
+                    "1" => { cprintln!("{v} "); None },
                     "f" => Some(Message::FullScreenToggle),
                     "q" => Some(Message::Quit),
                     "s" => Some(Message::Sort),
@@ -959,9 +976,36 @@ impl QuickViewer {
                     "r" => Some(Message::RandomImage),
                     "[" => Some(Message::DecDelay),
                     "]" => Some(Message::IncDelay),
-                     // a  => { cprintln!("{a}"); None }
+                     // a  => { cprintln!("~[c197]{a}"); None }
                      _  => None,
                 },
+
+                EV::KeyPressed { key: KK::Character(ref key), modifiers: keyboard::Modifiers::ALT, text:Some(_text),..} => match key.as_ref() {
+                    "w" => {cprintln!("Alt W"); None },
+                    "1" => {cprintln!("Alt 1"); None },
+                    "d" => { Some(Message::LookAheadDisplayToggle) }
+                     // a  => { cprintln!("~[c197]Alt {text}"); None }
+                     _  => None,
+                },
+                EV::KeyPressed { key: KK::Character(ref key), modifiers: keyboard::Modifiers::CTRL, ..} => match key.as_ref() {
+                    "w" => {cprintln!("Ctrl w"); None },
+                    "1" => {cprintln!("Ctrl 1"); None },
+                     // a  => { cprintln!("~[c197]Ctrl {key}"); None }
+                     _  => None,
+                },
+                EV::KeyPressed { key: KK::Character(ref key), modifiers: keyboard::Modifiers::SHIFT, ..} => match key.as_ref() {
+                    "w" => {cprintln!("W {event:?}"); None },
+                    "a" => {cprintln!("a {event:?}"); None },
+                    "1" => {cprintln!("1 {event:?}"); None },
+                     // a  => { cprintln!("4: {key:?}"); None }
+                     _  => None,
+                },
+
+
+                // EV::KeyPressed { key: KK::Character(ref key), ..} => match key.as_ref() {
+                //      // a  => { cprintln!("4: {event:?}"); None }
+                //      _  => None,
+                // },
                 _ => None,
             }),
 
