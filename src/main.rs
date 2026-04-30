@@ -13,7 +13,7 @@ use toast::{Toast};
 
 use crate::list_files::SomeFiles;
 
-use crate::img_traits::{ImageError};
+use crate::img_traits::{ImageError,LoadData};
 use crate::list_files::{FileSystemHelper};
 
 use crate::img_list::{ImageList};
@@ -99,7 +99,7 @@ enum Message {
     ByeToaster(usize),
 
     RequestAnImage(NonZeroUsize),
-    ImageLoaded( Result<(NonZeroUsize, ImageHandle ), ImageError>),
+    ImageLoaded( Result<LoadData, ImageError>),
     ImageCached( NonZeroUsize, Result<Allocation,iced::advanced::image::Error> ),
 
     FindFilesOnPath,
@@ -324,7 +324,7 @@ impl QuickViewer {
             Err(_) => { String::from("") }
         };
 
-        cprintln!("{t} {key:x} {path}");
+        cprintln!("{t} {key:#?} {path}");
 
         self.pending_image_requests.remove(&key);
 
@@ -439,11 +439,12 @@ impl QuickViewer {
                 Task::none()
             },
 
-            Message::ImageLoaded(Ok((key,handle))) => {
-                iced::widget::image::allocate(handle).map(move |alloc| { Message::ImageCached(*&key,alloc) } )
+            Message::ImageLoaded( Ok(ls) ) => {
+                // cprintln!("{ls:?}");
+                iced::widget::image::allocate(ls.handle).map(move |alloc| { Message::ImageCached(ls.id,alloc) } )
             },
 
-            Message::ImageCached( k,Ok(a) ) => {
+            Message::ImageCached(k,Ok(a) ) => {
                 // cprintln!("~[c255]{:?},~[c51]{k:x}  {:?}",self.now-self.start,a.handle());
                 self.pending_image_requests.remove(&k);
                 self.cache_image_alloc.push(k, a);

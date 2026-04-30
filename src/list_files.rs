@@ -7,8 +7,9 @@ use std::fmt;
 use std::fmt::{Display,Formatter};
 use std::num::NonZeroUsize;
 
-use crate::img_traits::{  ImageDyn, ImageOrigin };
+use crate::img_traits::{  ImageDyn, ImageOrigin, LoadData };
 use std::path::{PathBuf};
+use std::time::{Instant};
 
 use image::ImageReader;
 use std::fs::File;
@@ -150,6 +151,8 @@ static EXTENSIONS: &'static [&'static str] = &[
     "GIF", "webp"
 ];
 
+
+
 type FsiVec = VecDeque<FileSystemImage>;
 
 impl FileSystemHelper {
@@ -223,24 +226,30 @@ impl FileSystemHelper {
         })
     }
 
-    pub async fn load_image(fqp:PathBuf,id: NonZeroUsize)
-        -> Result<(NonZeroUsize, ImageHandle), ImageError> {
+    pub async fn load_image(fqp:PathBuf,id:NonZeroUsize)
+        -> Result<LoadData, ImageError> {
 
         let _ext = match fqp.as_path().extension() {
             Some(ext) => match ext.to_str() { None => { "" }, Some(ext) => ext, }
             None => { "" }
         };
 
+        let open = Instant::now();
         let mut file = match File::open(&fqp) {
             Ok(f) => f,
             Err(_e) => { return Err(ImageError::ErrorOpeningImageFile(id)); }
         };
+        let open = open.elapsed();
 
+
+        let read = Instant::now();
         let mut buffer = Vec::new();
         let Ok(_) = file.read_to_end(&mut buffer) else {
             return Err(ImageError::ErrorReadingImageFile(id));
         };
+        let read = read.elapsed();
 
+        let decode = Instant::now();
         let Ok(reader) = ImageReader::new(Cursor::new(buffer)).with_guessed_format() else {
             return Err(ImageError::ErrorGuessingFormat(id));
         };
@@ -251,13 +260,14 @@ impl FileSystemHelper {
                 return Err(ImageError::ErrorDecodingImage(id));
             }
         };
+        let decode = decode.elapsed();
 
         let width   = image.width();
         let height  = image.height();
         let data    = image.to_rgba8().into_raw();
         let handle  = ImageHandle::from_rgba(width, height, data);
 
-        Ok((id, handle))
+        Ok( LoadData { id, handle, open, read, decode } )
     }
 
 }
