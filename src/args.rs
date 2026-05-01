@@ -60,6 +60,9 @@ pub struct Args {
     #[arg(long, default_value_t=5)]
     pub look_behind: isize,
 
+    #[arg(long, default_value_t=12)]
+    pub font_size: u32,
+
     /// emit time of a full loop through images
     #[arg(long)]
     pub time_forward_loop: bool,

@@ -74,6 +74,9 @@ enum Message {
     DecDelay,
     IncDelay,
 
+    FontUp,
+    FontDown,
+
     LookAheadDisplayToggle,
     ExifDisplayToggle,
 
@@ -411,6 +414,17 @@ impl QuickViewer {
             },
 
 
+            Message::FontDown => {
+                if self.args.font_size > 8
+                {
+                    self.args.font_size -= 1;
+                }
+                Task::none()
+            },
+            Message::FontUp => {
+                self.args.font_size += 1;
+                Task::none()
+            },
 
             Message::LookAheadDisplayToggle => {
                 self.args.view_cache_look_ahead = !self.args.view_cache_look_ahead;
@@ -791,13 +805,10 @@ impl QuickViewer {
     }
 
     fn has_exif(&self) -> Option<&exif::Exif> {
-        // if self.args.view_exif {
-            let key = match self.img_list.key() { Ok(k) => k,Err(_) => { return None; } };
-            let ii  = match self.loaded_image_info.get(&key) { Some(ii) => ii, None => { return None;} };
-            let exif = match &ii.exif { Some(e) => e, None => {return None;} };
-            return Some(exif);
-        // }
-        // None
+        let key = match self.img_list.key() { Ok(k) => k,Err(_) => { return None; } };
+        let ii  = match self.loaded_image_info.get(&key) { Some(ii) => ii, None => { return None;} };
+        let exif = match &ii.exif { Some(e) => e, None => {return None;} };
+        return Some(exif);
     }
 
     fn best_date_from_exif(exif:&exif::Exif) -> Option<String> {
@@ -853,7 +864,7 @@ impl QuickViewer {
         };
 
         let image_size = match self.img_list.item() {
-            Ok(n) => text(humansize::format_size( n.size(), humansize::DECIMAL )).size(12).color(color!(0xa368a8)).font(Font::MONOSPACE),
+            Ok(n) => text(humansize::format_size( n.size(), humansize::DECIMAL )).size(self.args.font_size).color(color!(0xa368a8)).font(Font::MONOSPACE),
             Err(_) => text("")
         };
 
@@ -862,10 +873,10 @@ impl QuickViewer {
             Err(_) => String::from(" ")
         };
 
-        let image_dim = text(image_dim).size(12).color(color!(0xFD5E53)).font(Font::MONOSPACE);
+        let image_dim = text(image_dim).size(self.args.font_size).color(color!(0xFD5E53)).font(Font::MONOSPACE);
 
         let image_dt = match self.best_date() {
-            Some(d) => { text(d).size(12).color(color!(0xFD5EF3)).font(Font::MONOSPACE) }
+            Some(d) => { text(d).size(self.args.font_size).color(color!(0xFD5EF3)).font(Font::MONOSPACE) }
             None => {
                 let format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
                 let y = match self.img_list.item() {
@@ -873,7 +884,7 @@ impl QuickViewer {
                     Err(_)  => "frack".into()
                 };
 
-                text(y).size(12).color(color!(0xaFaFaF)).font(Font::MONOSPACE)
+                text(y).size(self.args.font_size).color(color!(0xaFaFaF)).font(Font::MONOSPACE)
             }
         };
 
@@ -914,34 +925,37 @@ impl QuickViewer {
                         } )
                     )
                     .width(Length::Fill)
-                    .align_x(text::Alignment::Right),
-                ]
+                    .align_x(text::Alignment::Right)
+                    ,
+                ].height(15).align_y(iced::alignment::Vertical::Center)
             };
 
         let counter = if t == 0 {
-            row![ text!("No images").size(12).color(color!(0xC5B358)) ]
+            row![ text!("No images").size(self.args.font_size).color(color!(0xC5B358)) ]
         } else {
             row![
-                text!("{:>12}", num(c))
-                    .size(12)
-                    .color(clr)
-                    .font(Font::MONOSPACE),
-                text!("/")
-                    .size(12)
-                    .color(color!(0xafafaf))
-                    .font(Font::MONOSPACE),
-                text!("{:<12}", num(t))
-                    .size(12)
-                    .color(color!(0x536878))
-                    .font(Font::MONOSPACE),
-                container( image_size ) .width(70),
-                container( image_dim )  .width(130),
-                container( image_dt )   .width(150),
+                row!(
+                    text!("{:>12}", num(c))
+                        .size(self.args.font_size)
+                        .color(clr)
+                        .font(Font::MONOSPACE),
+                    text!("/")
+                        .size(self.args.font_size)
+                        .color(color!(0xafafaf))
+                        .font(Font::MONOSPACE),
+                    text!("{:<12}", num(t))
+                        .size(self.args.font_size)
+                        .color(color!(0x536878))
+                        .font(Font::MONOSPACE)
+                )                       .padding([0,10]),
+                container( image_size ) .padding([0,10]),
+                container( image_dim )  .padding([0,10]),
+                container( image_dt )   .padding([0,10]),
                 text(fnam)
-                    .size(12)
+                    .size(self.args.font_size)
                     .color(color!(0xC5B358))
                     .wrapping(Wrapping::None),
-            ]
+            ].height(Length::Shrink)
         };
 
 
@@ -953,7 +967,21 @@ impl QuickViewer {
                     container(
                     container(
                         column(
-                            exf.fields().map( |f| { text!("{}/{}: {}",f.ifd_num,f.tag,f.display_value().with_unit(f)).color(color!(0xFFFFFF)).into() } )
+                            exf.fields().map( |f| {
+                                if f.tag != exif::Tag::MakerNote {
+                                    let c = match f.tag {
+                                        exif::Tag::DateTime |
+                                        exif::Tag::DateTimeOriginal |
+                                        exif::Tag::DateTimeDigitized => { color!(0xFFFFE0) },
+                                        _ => color!(0xaFaFaF)
+                                    };
+
+                                    text!("{}/{}: {}",f.ifd_num,f.tag,f.display_value().with_unit(f)).color(c).into()
+                                }
+                                else {
+                                    text!("MakerNote skipped").into()
+                                }
+                            } )
                         )
                     )
                     .style( |_| {
@@ -1045,7 +1073,7 @@ impl QuickViewer {
             container(row![
                 row![ counter],
                 row![ progress_area ]
-            ]).height(iced::Length::Fixed(15.0))
+            ])//.height(iced::Length::Fixed( (self.args.font_size+3) as f32))
             .clip(true),
         ];
 
@@ -1126,7 +1154,9 @@ impl QuickViewer {
                 },
                 EV::KeyPressed { key: KK::Character(ref key), modifiers: keyboard::Modifiers::CTRL, ..} => match key.as_ref() {
                     "w" => {cprintln!("Ctrl w"); None },
-                    "1" => {cprintln!("Ctrl 1"); None },
+                    "-" => { Some(Message::FontDown) },
+                    "+" => { Some(Message::FontUp) },
+                    "=" => { Some(Message::FontUp) },
                      // a  => { cprintln!("~[c197]Ctrl {key}"); None }
                      _  => None,
                 },
