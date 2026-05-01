@@ -3,19 +3,40 @@ use std::num::NonZeroUsize;
 use std::time::{Duration};
 
 use iced::widget::image::Handle as ImageHandle;
+use iced::Size;
 
 use std::hash::{Hash, Hasher};
 
-#[derive(Debug,Clone)]
 #[allow(unused)]
 pub struct LoadData {
     pub id:         NonZeroUsize,
-    pub handle:     ImageHandle,
+    pub handle:     Option<ImageHandle>,
     pub open:       Duration,
     pub read:       Duration,
     pub decode:     Duration,
+    pub dimensions: Size<u32>,
+    pub exif:       Option<exif::Exif>,
 }
 
+use std::fmt;
+impl Debug for LoadData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoadData")
+            .field("id", &self.id)
+            .field("handle", if self.handle.is_some() { &true } else { &false } )
+            .field("open", &self.open)
+            .field("read", &self.read)
+            .field("decode", &self.decode)
+            .field("dimensions", &self.dimensions)
+            .field("exif", if self.exif.is_some() { &true } else { &false })
+
+        .finish()
+    }
+}
+
+impl Clone for LoadData {
+    fn clone(&self) -> Self { todo!() }
+}
 
 impl PartialEq for LoadData {
     fn eq(&self, other: &Self) -> bool {
@@ -49,13 +70,13 @@ pub enum ImageError
 
 
 pub trait ImageOrigin {
-    fn origin(&self)    -> &str;
-    fn group(&self)     -> &str;
-    fn name(&self)      -> &str;
-    fn display(&self)   -> String;
-    fn fqp(&self)       -> std::path::PathBuf;
-    fn size(&self)      -> u64;
-    fn ftime(&self)     -> time::UtcDateTime;
+    fn origin(&self)        -> &str;
+    fn group(&self)         -> &str;
+    fn name(&self)          -> &str;
+    fn display(&self)       -> String;
+    fn fqp(&self)           -> std::path::PathBuf;
+    fn size(&self)          -> u64;
+    fn ftime(&self)         -> time::UtcDateTime;
 }
 
 

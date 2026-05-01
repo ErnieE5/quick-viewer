@@ -3226,6 +3226,7 @@ dependencies = [
  "iced",
  "iced_core",
  "image",
+ "kamadak-exif",
  "libheif-rs",
  "lru 0.17.0",
  "num-format",

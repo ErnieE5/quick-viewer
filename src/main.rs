@@ -21,8 +21,6 @@ use crate::img_list::{ImageList};
 use iced::keyboard;
 use iced::mouse::{ ScrollDelta };
 use iced::time::Instant;
-// use iced::widget::{ Column, Container, Slider,Image};
-// use iced::Function;
 use iced::widget::image::Handle as ImageHandle;
 use iced::widget::text::Wrapping;
 
@@ -31,8 +29,6 @@ use iced::task::Handle as TaskHandle;
 use std::hash::{Hash, Hasher};
 
 use iced::widget::{
-    // Column,
-    // text::Catalog,
     progress_bar,
     Theme,
     float,
@@ -43,28 +39,18 @@ use iced::widget::{
     column,
     container,
     container::Style as CStyle,
-    // text_input, toggler,
     mouse_area,
     image as iced_image,
-    //stack,
-    // , radio, rich_text,
     row,
-    // scrollable, slider, space, span,
     text,
     image::viewer,
 };
+
 use iced::{
-    // Center, Color,
     Element,
     Length,
     Fill,
     Font,
-    // Point,
-    // Pixels,
-    // Rectangle,
-    // Renderer,
-    // Rotation, Radians, ContentFit,window,
-    // Size,
     Subscription,
     Task,
     color,
@@ -82,20 +68,20 @@ use iced::advanced::image::Error      as AllocError;
 
 #[derive(Debug, Clone)]
 enum Message {
-    // Up,
     Left,
-    // Down,
     Right,
 
     DecDelay,
     IncDelay,
 
     LookAheadDisplayToggle,
+    ExifDisplayToggle,
 
     Space,
     Quit,
     Sort,
     SortSize,
+    SortDate,
     Shuffle,
     Swap,
     Scrolled(ScrollDelta),
@@ -121,6 +107,7 @@ enum Message {
 
 
 }
+
 
 
 
@@ -170,6 +157,8 @@ pub struct QuickViewer {
     now:                    Instant,
     img_list:               ImageList,
 
+    loaded_image_info:          HashMap<ImageKey,LoadData>,
+
 
     toasts: Vec<Toast>,
 
@@ -179,11 +168,11 @@ pub struct QuickViewer {
     cache_image_alloc:          LruCache<ImageKey, ImageAllocation>,
     pending_image_requests:     HashMap<ImageKey,CacheData>,
 
-    scan_dir_task:          Option<TaskHandle>,
-    current_scan_dir:       String,
+    scan_dir_task:              Option<TaskHandle>,
+    current_scan_dir:           String,
 
-    zoom:bool,
-    fullscreen:bool,
+    zoom:                       bool,
+    fullscreen:                 bool,
 
     empty_image: ImageHandle,
 
@@ -229,7 +218,6 @@ impl QuickViewer {
     fn default() -> Self {
         let args = args::do_args();
 
-
         Self {
             cache_image_alloc:  LruCache::new(ImageKey::new(args.cache_size).unwrap()),
             fullscreen:         args.fullscreen,
@@ -239,12 +227,14 @@ impl QuickViewer {
                     whd_from_asset!("../assets/jasper.png")
                 }
                 else {
+                    // 1 pixel zero opacity RGBA
                     (1,1,vec![0,0,0,0])
                 };
 
                 ImageHandle::from_rgba(w, h, d)
             },
 
+            loaded_image_info: HashMap::new(),
 
             toasts: vec![
                 // Toast { message: "1".into(),},
@@ -258,13 +248,13 @@ impl QuickViewer {
             img_list:       ImageList::new(),
 
 
-            current_image_handle: None,
+            current_image_handle:   None,
 
-            show_when_loaded: None,
+            show_when_loaded:       None,
             pending_image_requests: HashMap::new(),
-            scan_dir_task: None,
-            zoom:false,
-            current_scan_dir:String::from(""),
+            scan_dir_task:          None,
+            zoom:                   false,
+            current_scan_dir:       "".into(),
 
             args,
         }
@@ -420,10 +410,17 @@ impl QuickViewer {
                 Task::none()
             },
 
+
+
             Message::LookAheadDisplayToggle => {
                 self.args.view_cache_look_ahead = !self.args.view_cache_look_ahead;
                 Task::none()
             },
+
+            Message::ExifDisplayToggle => {
+                self.args.view_exif = !self.args.view_exif;
+                Task::none()
+            }
 
             Message::IncDelay =>      {
                 self.args.delay += 5;
@@ -510,9 +507,17 @@ impl QuickViewer {
                 Task::none()
             },
 
-            Message::ImageLoaded( Ok(ls) ) => {
-                // cprintln!("{ls:?}");
-                iced::widget::image::allocate(ls.handle).map(move |alloc| { Message::ImageCached(ls.id,alloc) } )
+            Message::ImageLoaded( Ok(mut ls) ) => {
+                let key     = ls.id;
+
+                let handle  = match ls.handle { Some(ref h) => h.clone(), None => { return Task::none(); } } ;
+
+                // handle is held by the LruCache
+                ls.handle = None;
+
+                self.loaded_image_info.insert(ls.id,ls);
+
+                iced::widget::image::allocate(handle).map(move |alloc| { Message::ImageCached(key,alloc) } )
             },
 
             Message::ImageCached(k,Ok(a) ) => {
@@ -629,6 +634,24 @@ impl QuickViewer {
             }
             Message::SortSize => {
                 let _ = self.img_list.sort_size();
+                self.preload_task(false)
+            }
+
+            Message::SortDate => {
+                let _ = self.img_list.sort_date();
+
+                /* Sort by exif date
+                let _ = self.img_list.sort_by( |a,b| {
+                    let Some(aa) = self.loaded_image_info.get(&a) else { panic!(); };
+                    let Some(bb) = self.loaded_image_info.get(&b) else { panic!(); };
+
+                    let exifa = match &aa.exif { Some(e) => e, None => { panic!(); } };
+                    let exifb = match &bb.exif { Some(e) => e, None => { panic!(); } };
+
+                    QuickViewer::best_date_from_exif(&exifa).cmp(&QuickViewer::best_date_from_exif(&exifb))
+                });
+                */
+
                 self.preload_task(false)
             }
 
@@ -767,6 +790,49 @@ impl QuickViewer {
         }
     }
 
+    fn has_exif(&self) -> Option<&exif::Exif> {
+        // if self.args.view_exif {
+            let key = match self.img_list.key() { Ok(k) => k,Err(_) => { return None; } };
+            let ii  = match self.loaded_image_info.get(&key) { Some(ii) => ii, None => { return None;} };
+            let exif = match &ii.exif { Some(e) => e, None => {return None;} };
+            return Some(exif);
+        // }
+        // None
+    }
+
+    fn best_date_from_exif(exif:&exif::Exif) -> Option<String> {
+        let mut v = Vec::new();
+
+        match exif.get_field(exif::Tag::DateTime,exif::In::PRIMARY) {
+            Some(d) => { v.push(d.display_value().to_string()) }
+            None => {  }
+        };
+        match exif.get_field(exif::Tag::DateTimeOriginal,exif::In::PRIMARY) {
+            Some(d) => { v.push(d.display_value().to_string()) }
+            None => { }
+        };
+        match exif.get_field(exif::Tag::DateTimeDigitized,exif::In::PRIMARY) {
+            Some(d) => { v.push(d.display_value().to_string()) }
+            None => {  }
+        };
+        v.sort();
+
+        if !v.is_empty() {
+
+            return Some(v[0].clone());
+        }
+        None
+    }
+
+    fn best_date(&self) -> Option<String> {
+
+        let exif = match self.has_exif() {
+            Some(e) => e,
+            None => {return None;}
+        };
+
+        QuickViewer::best_date_from_exif(exif)
+    }
 
 
     fn view(&self) -> Element<'_, Message> {
@@ -786,9 +852,29 @@ impl QuickViewer {
             Err(_) => String::from(" ")
         };
 
-        let size = match self.img_list.item() {
-            Ok(n) => humansize::format_size( n.size(), humansize::DECIMAL ),
+        let image_size = match self.img_list.item() {
+            Ok(n) => text(humansize::format_size( n.size(), humansize::DECIMAL )).size(12).color(color!(0xa368a8)).font(Font::MONOSPACE),
+            Err(_) => text("")
+        };
+
+        let image_dim = match self.img_list.key() {
+            Ok(key) => match self.loaded_image_info.get(&key) { Some(i) => format!("{:>7} x {:<7}",num(i.dimensions.width),num(i.dimensions.height)), None => "".into() },
             Err(_) => String::from(" ")
+        };
+
+        let image_dim = text(image_dim).size(12).color(color!(0xFD5E53)).font(Font::MONOSPACE);
+
+        let image_dt = match self.best_date() {
+            Some(d) => { text(d).size(12).color(color!(0xFD5EF3)).font(Font::MONOSPACE) }
+            None => {
+                let format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+                let y = match self.img_list.item() {
+                    Ok(i) => format!("{}",i.ftime().format(&format).unwrap()) ,
+                    Err(_)  => "frack".into()
+                };
+
+                text(y).size(12).color(color!(0xaFaFaF)).font(Font::MONOSPACE)
+            }
         };
 
         let clr = match self.show_when_loaded {
@@ -848,16 +934,47 @@ impl QuickViewer {
                     .size(12)
                     .color(color!(0x536878))
                     .font(Font::MONOSPACE),
-                container( text(size).size(12).color(color!(0xa368a8)).font(Font::MONOSPACE) )
-                    // .padding([0,10])
-                    .width(100)
-                ,
+                container( image_size ) .width(70),
+                container( image_dim )  .width(130),
+                container( image_dt )   .width(150),
                 text(fnam)
                     .size(12)
                     .color(color!(0xC5B358))
                     .wrapping(Wrapping::None),
             ]
         };
+
+
+
+        let exf =
+        if self.args.view_exif {
+            match self.has_exif() {
+                Some(exf) => {
+                    container(
+                    container(
+                        column(
+                            exf.fields().map( |f| { text!("{}/{}: {}",f.ifd_num,f.tag,f.display_value().with_unit(f)).color(color!(0xFFFFFF)).into() } )
+                        )
+                    )
+                    .style( |_| {
+                        CStyle {
+                            background: Some(iced::Background::Color(iced::Color::from_rgba8(0, 0, 0,0.25))),
+                            ..CStyle::default()
+                        }
+                    })
+                    )
+
+                }
+                None  => { container(row![]) }
+            }
+        }
+        else {
+            container(row![])
+        }
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_y(iced::alignment::Vertical::Top)
+        .align_x(iced::alignment::Horizontal::Left);
 
 
         let dbg = if self.args.view_cache_look_ahead {
@@ -916,6 +1033,7 @@ impl QuickViewer {
                 stack![
                     iced_image(h).width(Fill).height(Fill),
                     float( dbg ),
+                    float( exf ),
 
                 ].width(Fill).height(Fill)
             )
@@ -989,6 +1107,7 @@ impl QuickViewer {
                     "q" => Some(Message::Quit),
                     "s" => Some(Message::Sort),
                     "S" => Some(Message::SortSize),
+                    "d" => Some(Message::SortDate),
                     "h" => Some(Message::Shuffle),
                     "r" => Some(Message::RandomImage),
                     "[" => Some(Message::DecDelay),
@@ -1001,6 +1120,7 @@ impl QuickViewer {
                     "w" => {cprintln!("Alt W"); None },
                     "1" => {cprintln!("Alt 1"); None },
                     "d" => { Some(Message::LookAheadDisplayToggle) }
+                    "e" => { Some(Message::ExifDisplayToggle) }
                      // a  => { cprintln!("~[c197]Alt {text}"); None }
                      _  => None,
                 },

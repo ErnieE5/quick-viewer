@@ -7,6 +7,7 @@ use std::ops::{RangeBounds,Bound};
 use std::collections::{HashMap};
 
 use std::num::NonZeroUsize;
+use std::cmp::Ordering;
 
 use crate::img_traits::{ ImageDyn, ImageError, };
 
@@ -20,7 +21,6 @@ pub struct ImageList {
     list_index: usize,
     next_key:   ImageKey,
 }
-
 
 pub struct PeekWalker {
     pos:    NonZeroUsize,
@@ -342,6 +342,34 @@ impl ImageList {
         Ok(())
     }
 
+    pub fn sort_date(&mut self) -> Result<(),ImageError> {
+        if self.list.is_empty() {
+            return Err(ImageError::Uninitialized);
+        }
+        let idx = self.list_index;
+        let cur = self.list[idx];
+
+        self.list.sort_by( |a,b| {
+
+            let aa = match self.store.get(a) {
+                Some(a) => a.ftime(),
+                None => { todo!(); }
+            };
+            let bb = match self.store.get(b) {
+                Some(b) => b.ftime(),
+                None  => { todo!(); }
+            };
+
+            aa.cmp(&bb)
+        });
+
+        self.list_index = match self.list.iter().position(|&i| i==cur) {
+            Some(idx) => idx,
+            None => { return Err(ImageError::Unexpected); }
+        };
+
+        Ok(())
+    }
 
     pub fn sort(&mut self) -> Result<(),ImageError> {
         if self.list.is_empty() {
@@ -370,6 +398,29 @@ impl ImageList {
         };
 
         Ok(())
+    }
+
+    pub fn sort_by<F>(&mut self, compare: F) -> Result<(),ImageError>
+    where
+        F: FnMut(&ImageKey, &ImageKey)-> Ordering
+    {
+
+        if self.list.is_empty() {
+            return Err(ImageError::Uninitialized);
+        }
+        let idx = self.list_index;
+        let cur = self.list[idx];
+
+        self.list.sort_by( compare );
+
+        self.list_index = match self.list.iter().position(|&i| i==cur) {
+            Some(idx) => idx,
+            None => { return Err(ImageError::Unexpected); }
+        };
+
+        Ok(())
+
+
     }
 
 }

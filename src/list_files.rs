@@ -13,9 +13,9 @@ use std::time::{Instant};
 
 use image::ImageReader;
 use std::fs::File;
-use std::io::Cursor;
-use std::io::Read;
+use std::io::{ Seek, SeekFrom };
 
+use iced::Size;
 use iced::task::{Straw, sipper};
 use std::collections::{VecDeque};
 
@@ -23,6 +23,7 @@ use walkdir::WalkDir;
 
 use iced::widget::image::Handle as ImageHandle;
 
+use exif::Reader as ExifReader;
 
 #[derive(Debug, Clone)]
 pub struct FileSystemImage {
@@ -100,7 +101,8 @@ impl ImageOrigin for FileSystemImage {
     }
 
     fn ftime(&self) -> time::UtcDateTime {
-        time::macros::utc_datetime!(1970-01-05 10:11)
+        self.ftime.truncate_to_second()
+        // time::macros::utc_datetime!(1970-01-05 10:11)
     }
 }
 
@@ -247,7 +249,7 @@ impl FileSystemHelper {
         };
 
         let open = Instant::now();
-        let mut file = match File::open(&fqp) {
+        let file = match File::open(&fqp) {
             Ok(f) => f,
             Err(_e) => { return Err(ImageError::ErrorOpeningImageFile(id)); }
         };
@@ -255,17 +257,30 @@ impl FileSystemHelper {
 
         tokio::task::yield_now().await;
 
+
         let read = Instant::now();
-        let mut buffer = Vec::new();
-        let Ok(_) = file.read_to_end(&mut buffer) else {
-            return Err(ImageError::ErrorReadingImageFile(id));
+
+        let mut bufreader = std::io::BufReader::new(&file);
+
+        let exifreader = ExifReader::new();
+
+        let exif = match exifreader.read_from_container(&mut bufreader) {
+            Ok(exif) => { Some(exif) },
+            Err(_)   => { None }
         };
+
+        match bufreader.seek(SeekFrom::Start(0)) {
+            Ok(_)   => { },
+            Err(_e) => { return Err(ImageError::ErrorReadingImageFile(id)); }
+        }
+
         let read = read.elapsed();
+
 
         tokio::task::yield_now().await;
 
         let decode = Instant::now();
-        let Ok(reader) = ImageReader::new(Cursor::new(buffer)).with_guessed_format() else {
+        let Ok(reader) = ImageReader::new(bufreader).with_guessed_format() else {
             return Err(ImageError::ErrorGuessingFormat(id));
         };
 
@@ -284,7 +299,17 @@ impl FileSystemHelper {
         let data    = image.to_rgba8().into_raw();
         let handle  = ImageHandle::from_rgba(width, height, data);
 
-        Ok( LoadData { id, handle, open, read, decode } )
+        let r = LoadData {
+            id,
+            handle: Some(handle),
+            open,
+            read,
+            decode,
+            dimensions:Size::new(width,height),
+            exif
+        };
+
+        Ok( r )
     }
 
 }

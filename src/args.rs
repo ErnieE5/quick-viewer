@@ -29,7 +29,7 @@ pub struct Args {
 
 
     /// number of images to keep around
-    #[arg(long, default_value_t=30)]
+    #[arg(long, default_value_t=20)]
     pub cache_size:usize,
 
 
@@ -49,13 +49,15 @@ pub struct Args {
     #[arg(long)]
     pub view_cache_look_ahead:bool,
 
+    #[arg(long)]
+    pub view_exif:bool,
 
     /// Cache look ahead
-    #[arg(long, default_value_t=10)]
+    #[arg(long, default_value_t=5)]
     pub look_ahead: isize,
 
     /// Cache look behind
-    #[arg(long, default_value_t=10)]
+    #[arg(long, default_value_t=5)]
     pub look_behind: isize,
 
     /// emit time of a full loop through images
