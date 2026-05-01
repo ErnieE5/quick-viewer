@@ -95,6 +95,7 @@ enum Message {
     Space,
     Quit,
     Sort,
+    SortSize,
     Shuffle,
     Swap,
     Scrolled(ScrollDelta),
@@ -180,8 +181,6 @@ pub struct QuickViewer {
 
     scan_dir_task:          Option<TaskHandle>,
     current_scan_dir:       String,
-
-    // scale_factor:           viewer::State,
 
     zoom:bool,
     fullscreen:bool,
@@ -628,6 +627,11 @@ impl QuickViewer {
                 let _ = self.img_list.sort();
                 self.preload_task(false)
             }
+            Message::SortSize => {
+                let _ = self.img_list.sort_size();
+                self.preload_task(false)
+            }
+
 
             Message::Shuffle => {
                 let _ = self.img_list.shuffle();
@@ -782,6 +786,11 @@ impl QuickViewer {
             Err(_) => String::from(" ")
         };
 
+        let size = match self.img_list.item() {
+            Ok(n) => humansize::format_size( n.size(), humansize::DECIMAL ),
+            Err(_) => String::from(" ")
+        };
+
         let clr = match self.show_when_loaded {
             None    => { color!(0xF5F5F5)  }
             Some(_) => { color!(0xFF00FF)  }
@@ -839,6 +848,10 @@ impl QuickViewer {
                     .size(12)
                     .color(color!(0x536878))
                     .font(Font::MONOSPACE),
+                container( text(size).size(12).color(color!(0xa368a8)).font(Font::MONOSPACE) )
+                    // .padding([0,10])
+                    .width(100)
+                ,
                 text(fnam)
                     .size(12)
                     .color(color!(0xC5B358))
@@ -975,6 +988,7 @@ impl QuickViewer {
                     "f" => Some(Message::FullScreenToggle),
                     "q" => Some(Message::Quit),
                     "s" => Some(Message::Sort),
+                    "S" => Some(Message::SortSize),
                     "h" => Some(Message::Shuffle),
                     "r" => Some(Message::RandomImage),
                     "[" => Some(Message::DecDelay),
@@ -1042,94 +1056,15 @@ impl QuickViewer {
 
     pub fn theme(&self) -> Theme {
         // Theme::Moonfly
-        Theme::Oxocarbon
+        // Theme::Oxocarbon
         // Theme::Ferra
+        // Theme::Dracula
+        Theme::TokyoNight
+        // Theme::KanagawaWave
+        // Theme::Nightfly
     }
 
 }
-
-
-// use iced::mouse;
-// use iced::Renderer;
-// use iced::widget::canvas;
-// use iced::widget::canvas::{ Program, Frame };
-
-// use iced::{ Rectangle, Size, Point, };
-// use iced_core::image::Renderer as CoreRenderer;
-
-// impl QuickViewer {
-
-
-//     fn fit(&self,bounds: Rectangle, w: f32, h: f32) -> Rectangle {
-//         let rw = bounds.width / w;
-//         let rh = bounds.height / h;
-
-//         let q = if (w * rw).floor() <= bounds.width && (h * rw).floor() <= bounds.height {
-//             Size::new(w * rw * self.scale_factor, h * rw * self.scale_factor)
-//         } else if (w * rh).floor() <= bounds.width && (h * rh).floor() <= bounds.height {
-//             Size::new(w * rh * self.scale_factor, h * rh * self.scale_factor)
-//         } else {
-//             cprintln!("{w:?} {h:?} {bounds:?} {rw:?} {rh:?}");
-//             Size::new(0.0, 0.0);
-//             todo!();
-//         };
-
-//         let a = Point::new(
-//             (bounds.width - q.width) / 2.0,
-//             (bounds.height - q.height) / 2.0,
-//         );
-
-//         Rectangle::new(a, q)
-//     }
-// }
-
-
-
-
-// impl<Message> Program<Message> for QuickViewer {
-//     type State = ();
-
-//     fn draw(
-//         &self,
-//         _state: &Self::State,
-//         renderer: &Renderer,
-//         _theme: &Theme,
-//         bounds: Rectangle,
-//         _cursor: mouse::Cursor,
-//     ) -> Vec<canvas::Geometry> {
-//         let mut frame = Frame::new(renderer, bounds.size());
-
-//         if let Some(han) = self.current_image_handle.clone() {
-//             // match renderer.load_image(&han) {
-//             //     Ok(_) => {}
-//             //     Err(_) => {
-//             //         todo!();
-//             //     }
-//             // }
-
-//             let (w, h) = match renderer.measure_image(&han) {
-//                 Some(g) => (g.width as f32, g.height as f32),
-//                 None    => (0.0, 0.0),
-//             };
-
-//             frame.draw_image( self.fit(bounds, w , h), &han.clone());
-//         } else {
-
-//             let (w, h) = match renderer.measure_image(&self.empty_image) {
-//                 Some(g) => (g.width as f32, g.height as f32),
-//                 None    => (0.0, 0.0),
-//             };
-
-//             frame.draw_image( self.fit(bounds, w , h), &self.empty_image.clone());
-//         }
-
-//         vec![frame.into_geometry()]
-//     }
-// }
-
-
-
-
 
 
 pub fn main() -> iced::Result {

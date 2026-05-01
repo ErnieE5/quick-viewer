@@ -28,9 +28,10 @@ use iced::widget::image::Handle as ImageHandle;
 pub struct FileSystemImage {
     fqp:        PathBuf,
     origin:     String,
-    set:        String,
+    group:      String,
     name:       String,
-    index:      u64,
+    size:       u64,
+    ftime:      time::UtcDateTime,
 }
 
 
@@ -44,7 +45,7 @@ impl FileSystemImage {
             Err(_)  => { return Err(ImageError::Unexpected); }
         };
 
-        let set = match sub.parent() {
+        let group = match sub.parent() {
             Some(r)   => r,
             None      => { return Err(ImageError::Unexpected); }
         };
@@ -56,10 +57,11 @@ impl FileSystemImage {
 
         Ok( FileSystemImage {
             origin: origin.display().to_string(),
-            set:    set.display().to_string(),
+            group:  group.display().to_string(),
             name:   name.display().to_string(),
             fqp,
-            index:0
+            size: 0,
+            ftime: time::UtcDateTime::MIN,
         } )
     }
 
@@ -77,7 +79,7 @@ impl ImageOrigin for FileSystemImage {
     }
 
     fn display(&self) -> String {
-        let s = PathBuf::new().join(&self.set).join(&self.name);
+        let s = PathBuf::new().join(&self.group).join(&self.name);
         let o = match s.to_str() {
             Some(s) => s,
             None => ""
@@ -85,23 +87,27 @@ impl ImageOrigin for FileSystemImage {
         o.to_string()
     }
 
-    fn set(&self) -> &str {
-        self.set.as_str()
+    fn group(&self) -> &str {
+        self.group.as_str()
     }
 
     fn name(&self) -> &str {
         self.name.as_str()
     }
 
-    fn get_index(&self) -> u64 {
-        self.index
+    fn size(&self) -> u64 {
+        self.size
+    }
+
+    fn ftime(&self) -> time::UtcDateTime {
+        time::macros::utc_datetime!(1970-01-05 10:11)
     }
 }
 
 
 impl Ord for FileSystemImage {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.index.cmp(&other.index)
+        self.fqp.cmp(&other.fqp)
     }
 }
 
@@ -113,7 +119,7 @@ impl PartialOrd for FileSystemImage {
 
 impl PartialEq for FileSystemImage {
     fn eq(&self, other: &Self) -> bool {
-        self.index == other.index
+        self.fqp == other.fqp
     }
 }
 
@@ -122,7 +128,7 @@ impl Eq for FileSystemImage {}
 impl Display for FileSystemImage {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
     {
-        let s = PathBuf::new().join(&self.set).join(&self.name);
+        let s = PathBuf::new().join(&self.group).join(&self.name);
         let o = match s.to_str() {
             Some(s) => s,
             None => ""
@@ -178,7 +184,7 @@ impl FileSystemHelper {
                     }
 
                     match msg.files.last() {
-                        Some(s) => { msg.current_dir = s.set().to_string() },
+                        Some(s) => { msg.current_dir = s.group().to_string() },
                         None    => ()
                     };
 
@@ -192,9 +198,9 @@ impl FileSystemHelper {
                     .into_iter()
                     .filter_map( |e| { e.ok() } )
                 {
-                    let _size = match entry.metadata() {
-                        Ok(s) => s.len(),
-                        Err(_) => 0
+                    let (size,ftime) = match entry.metadata() {
+                        Ok(s) => (s.len(),s.created().unwrap()),
+                        Err(_) => (0,std::time::SystemTime::now())
                     };
 
                     let ext = match entry.path().extension() {
@@ -208,7 +214,13 @@ impl FileSystemHelper {
 
                     if entry.file_type().is_file() {
                         match FileSystemImage::new(&path, entry.path().to_path_buf() ) {
-                            Ok(i) => { items.push_back( i ) },
+                            Ok(mut i) => {
+
+                                i.size = size;
+                                i.ftime = ftime.into();
+
+                                items.push_back( i )
+                            },
                             Err(_) => { continue; }
                         }
                     }

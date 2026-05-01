@@ -49,36 +49,25 @@ pub enum ImageError
 
 
 pub trait ImageOrigin {
-    fn origin(&self) -> &str;
-    fn fqp(&self) -> std::path::PathBuf;
-    fn set(&self) -> &str;
-    fn name(&self) -> &str;
-    fn display(&self) -> String;
-    fn get_index(&self) -> u64;
+    fn origin(&self)    -> &str;
+    fn group(&self)     -> &str;
+    fn name(&self)      -> &str;
+    fn display(&self)   -> String;
+    fn fqp(&self)       -> std::path::PathBuf;
+    fn size(&self)      -> u64;
+    fn ftime(&self)     -> time::UtcDateTime;
 }
 
 
-
-
 use dyn_clone::{clone_trait_object, DynClone};
+use std::fmt::{Display,Debug};
 
-pub trait ImageDyn:
-                ImageOrigin +
-                std::fmt::Display+
-                std::fmt::Debug+
-                DynClone+
-                Send+
-                Sync+
-                {}
+pub trait ImageDyn: ImageOrigin+ Display+ Debug+ DynClone+ Send {
+}
 
 clone_trait_object!(ImageDyn);
 
-impl <T:ImageOrigin +
-        std::fmt::Display+
-        std::fmt::Debug+
-        DynClone+
-        Send+
-        Sync+
-        > ImageDyn for T {}
+impl <T:ImageOrigin+ Display+ Debug+ DynClone+ Send > ImageDyn for T {
+}
 
 
