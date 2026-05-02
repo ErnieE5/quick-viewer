@@ -18,7 +18,7 @@ use crate::list_files::{FileSystemHelper};
 
 use crate::img_list::{ImageList};
 
-use iced::keyboard;
+
 use iced::mouse::{ ScrollDelta };
 use iced::time::Instant;
 use iced::widget::image::Handle as ImageHandle;
@@ -29,7 +29,8 @@ use iced::task::Handle as TaskHandle;
 use std::hash::{Hash, Hasher};
 
 use iced::widget::{
-    progress_bar,
+    Container,
+    table,
     Theme,
     float,
     stack,
@@ -38,7 +39,9 @@ use iced::widget::{
     // center_x, center_y, checkbox,
     column,
     container,
-    container::Style as CStyle,
+    container::Style     as CStyle,
+    progress_bar,
+    progress_bar::Style  as PBStyle,
     mouse_area,
     image as iced_image,
     row,
@@ -53,7 +56,13 @@ use iced::{
     Font,
     Subscription,
     Task,
+    Background,
+    Renderer,
+    border,
     color,
+    keyboard,
+    alignment::Vertical,
+    alignment::Horizontal,
 };
 
 use std::collections::{ HashMap };
@@ -531,7 +540,7 @@ impl QuickViewer {
 
                 self.loaded_image_info.insert(ls.id,ls);
 
-                iced::widget::image::allocate(handle).map(move |alloc| { Message::ImageCached(key,alloc) } )
+                iced_image::allocate(handle).map(move |alloc| { Message::ImageCached(key,alloc) } )
             },
 
             Message::ImageCached(k,Ok(a) ) => {
@@ -911,7 +920,7 @@ impl QuickViewer {
                     .width(iced::Length::Fill)
                     .height(iced::Length::Fill)
                     .align_x(text::Alignment::Right)
-                    .align_y(iced::alignment::Vertical::Center)
+                    .align_y(Vertical::Center)
                     .wrapping(Wrapping::None),
                     button( text("stop").size(10) ).padding([0,2]).height(iced::Length::Shrink).on_press(Message::CancelFileFind)
                 ].spacing(10).padding([0,10]).height(iced::Length::Shrink)
@@ -924,11 +933,9 @@ impl QuickViewer {
                         progress_bar(0.0..=b,b-c as f32)
                         .length(50)
                         .style( |theme:&Theme| {
-                            use iced::{ border, Background };
-                            use iced::widget::progress_bar::Style;
                             let t = theme.palette();
 
-                            Style{
+                            PBStyle{
                                 background: Background::Color(t.primary ),
                                 bar:        Background::Color(t.background ),
                                 border:     border::color(t.background).width(5.5),
@@ -936,10 +943,12 @@ impl QuickViewer {
                         } )
                     )
                     .width(Length::Fill)
-                    .align_x(text::Alignment::Right)
+                    .height(Length::Fill)
                     .height(15)
+                    .align_x(text::Alignment::Right)
+                    .align_y(Vertical::Center)
                     ,
-                ].height(iced::Length::Shrink)
+                ]
             };
 
         let counter = if t == 0 {
@@ -967,56 +976,56 @@ impl QuickViewer {
             ].height(iced::Length::Shrink)
         };
 
-
-
-        let exf =
+        // EXIF info table
+        type Tbl<'a> = Container<'a, Message, Theme, Renderer>;
+        let exf:Tbl =
         if self.args.view_exif {
             match self.has_exif() {
+                None      => { container( row![]) },
                 Some(exf) => {
                     container(
-                    container(
-                        column(
-                            exf.fields().map( |f| {
-                                use exif::Tag;
-                                let d = match f.tag {
-                                    Tag::MakerNote |
-                                    Tag::UserComment |
-                                    Tag(exif::Context::Tiff,700) |
-                                    Tag(exif::Context::Tiff,59932) |
-                                    Tag(exif::Context::Exif,59932)
-                                                            => (color!(0xffafff),f.display_value().with_unit(f).to_string()[..20].to_string()),
+                        table(
+                            [
+                                // table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.ifd_num).size(self.args.font_size).color(color!(0x7f7f7f)) ),
+                                table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.tag    ).size(self.args.font_size).color(color!(0xafafaf)) ),
+                                table::column(text!("").height(1), |f:&exif::Field| {
+                                    use exif::Tag;
+                                    let d = match f.tag {
+                                        Tag::MakerNote |
+                                        Tag::UserComment |
+                                        Tag(exif::Context::Tiff,700) |
+                                        Tag(exif::Context::Tiff,59932) |
+                                        Tag(exif::Context::Exif,59932)
+                                                                => (color!(0xffafff),f.display_value().with_unit(f).to_string()[..20].to_string()),
 
-                                    Tag::ImageDescription   => { (color!(0xFF8040),f.display_value().with_unit(f).to_string()) },
+                                        Tag::ImageDescription   => (color!(0xFF8040),f.display_value().with_unit(f).to_string()),
 
-                                    Tag::DateTime |
-                                    Tag::DateTimeOriginal |
-                                    Tag::DateTimeDigitized  => (color!(0xFFFFE0),f.display_value().with_unit(f).to_string()),
-                                    _                       => (color!(0xaFaFaF),f.display_value().with_unit(f).to_string()),
-                                };
+                                        Tag::DateTime |
+                                        Tag::DateTimeOriginal |
+                                        Tag::DateTimeDigitized  => (color!(0xFFFFD0),f.display_value().with_unit(f).to_string()),
+                                        _                       => (color!(0xbfbfbf),f.display_value().with_unit(f).to_string()),
+                                    };
 
-                                text!("{}/{}: {}",f.ifd_num,f.tag,d.1).color(d.0).into()
-                            } )
+                                    text!("{}",d.1).color(d.0).size(self.args.font_size)
+                                })
+                            ],
+                            &mut exf.fields()
                         )
+                        .padding_x(10)
+                        .padding_y(2)
+                        .separator_x(0)
+                        .separator_y(0)
                     )
                     .style( |_| {
                         CStyle {
-                            background: Some(iced::Background::Color(iced::Color::from_rgba8(0, 0, 0,0.25))),
+                            background: Some(iced::Background::Color(iced::Color::from_rgba8(0, 0, 0,0.65))),
                             ..CStyle::default()
                         }
                     })
-                    )
-
                 }
-                None  => { container(row![]) }
             }
         }
-        else {
-            container(row![])
-        }
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_y(iced::alignment::Vertical::Top)
-        .align_x(iced::alignment::Horizontal::Left);
+        else { container(row![]) };
 
 
         let dbg = if self.args.view_cache_look_ahead {
@@ -1045,16 +1054,16 @@ impl QuickViewer {
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .align_y(iced::alignment::Vertical::Bottom)
-                .align_x(iced::alignment::Horizontal::Right)
+                .align_x(Horizontal::Right)
+                .align_y(Vertical::Center)
             }
             else
             {
                 container( text("  idle  ") )
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .align_y(iced::alignment::Vertical::Bottom)
-                .align_x(iced::alignment::Horizontal::Right)
+                .align_y(Vertical::Bottom)
+                .align_x(Horizontal::Right)
 
             } }
         else
