@@ -847,46 +847,57 @@ impl QuickViewer {
 
 
     fn view(&self) -> Element<'_, Message> {
-        // cprintln!("~[c51]{:?}      view ",self.now-self.start);
-
         let c = match self.img_list.the_index() {
             Ok(i) => i.get(),
             Err(_) => 0
         };
+
         let t = match self.img_list.total_items() {
             Ok(i) => i.get(),
             Err(_) => 0
         };
 
-        let fnam = match self.img_list.item() {
+        let file_name = match self.img_list.item() {
             Ok(n) => n.display(),
             Err(_) => String::from(" ")
         };
 
+        let file_name = text(file_name).size(self.args.font_size).color(color!(0xFDFD96)).wrapping(Wrapping::None);
+
+
         let image_size = match self.img_list.item() {
-            Ok(n) => text(humansize::format_size( n.size(), humansize::DECIMAL )).size(self.args.font_size).color(color!(0xa368a8)).font(Font::MONOSPACE),
-            Err(_) => text("")
+            Ok(n) =>    format!("{:<10}",humansize::format_size( n.size(), humansize::DECIMAL )),
+            Err(_) =>   format!("{:<10}","")
         };
 
+        let image_size = text(image_size).size(self.args.font_size).color(color!(0xa368a8)).font(Font::MONOSPACE);
+
         let image_dim = match self.img_list.key() {
-            Ok(key) => match self.loaded_image_info.get(&key) { Some(i) => format!("{:>7} x {:<7}",num(i.dimensions.width),num(i.dimensions.height)), None => "".into() },
-            Err(_) => String::from(" ")
+            Ok(key) => {
+                match self.loaded_image_info.get(&key) {
+                    Some(i) =>  format!("{: >6} x {: <6}",num(i.dimensions.width),num(i.dimensions.height)),
+                    None    =>  format!("{0:>6}   {0:>6}","")
+                }
+            },
+            Err(_)  =>          format!("{0:>6}   {0:>6}","")
         };
 
         let image_dim = text(image_dim).size(self.args.font_size).color(color!(0xFD5E53)).font(Font::MONOSPACE);
 
         let image_dt = match self.best_date() {
-            Some(d) => { text(d).size(self.args.font_size).color(color!(0xFD5EF3)).font(Font::MONOSPACE) }
+            Some(d) => (d,color!(0xE1A95F)),
             None => {
                 let format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
                 let y = match self.img_list.item() {
-                    Ok(i) => format!("{}",i.ftime().format(&format).unwrap()) ,
-                    Err(_)  => "frack".into()
+                    Ok(i)   => format!("{}",i.ftime().format(&format).unwrap()) ,
+                    Err(_)  => "0000-00-00 00:00:00".into()
                 };
 
-                text(y).size(self.args.font_size).color(color!(0xaFaFaF)).font(Font::MONOSPACE)
+                (y,color!(0xafafaf))
             }
         };
+
+        let image_dt = text(image_dt.0).size(self.args.font_size).color(image_dt.1);//.font(Font::MONOSPACE);
 
         let clr = match self.show_when_loaded {
             None    => { color!(0xF5F5F5)  }
@@ -903,7 +914,7 @@ impl QuickViewer {
                     .align_y(iced::alignment::Vertical::Center)
                     .wrapping(Wrapping::None),
                     button( text("stop").size(10) ).padding([0,2]).height(iced::Length::Shrink).on_press(Message::CancelFileFind)
-                ].spacing(10).padding([0,10])
+                ].spacing(10).padding([0,10]).height(iced::Length::Shrink)
             } else {
                 // Shows the pending cache load
                 let c = self.pending_image_requests.len();
@@ -926,12 +937,13 @@ impl QuickViewer {
                     )
                     .width(Length::Fill)
                     .align_x(text::Alignment::Right)
+                    .height(15)
                     ,
-                ].height(15).align_y(iced::alignment::Vertical::Center)
+                ].height(iced::Length::Shrink)
             };
 
         let counter = if t == 0 {
-            row![ text!("No images").size(self.args.font_size).color(color!(0xC5B358)) ]
+            row![ text!("No images").size(self.args.font_size).color(color!(0xC5B358)) ].height(20)
         } else {
             row![
                 row!(
@@ -947,15 +959,12 @@ impl QuickViewer {
                         .size(self.args.font_size)
                         .color(color!(0x536878))
                         .font(Font::MONOSPACE)
-                )                       .padding([0,10]),
-                container( image_size ) .padding([0,10]),
-                container( image_dim )  .padding([0,10]),
-                container( image_dt )   .padding([0,10]),
-                text(fnam)
-                    .size(self.args.font_size)
-                    .color(color!(0xC5B358))
-                    .wrapping(Wrapping::None),
-            ].height(Length::Shrink)
+                )                       ,
+                container( image_size ).padding([0,5]),
+                container( image_dim ) .padding([0,5]),
+                container( image_dt )  .padding([0,5]),
+                container( file_name)  .padding([0,5]),
+            ].height(iced::Length::Shrink)
         };
 
 
@@ -968,19 +977,24 @@ impl QuickViewer {
                     container(
                         column(
                             exf.fields().map( |f| {
-                                if f.tag != exif::Tag::MakerNote {
-                                    let c = match f.tag {
-                                        exif::Tag::DateTime |
-                                        exif::Tag::DateTimeOriginal |
-                                        exif::Tag::DateTimeDigitized => { color!(0xFFFFE0) },
-                                        _ => color!(0xaFaFaF)
-                                    };
+                                use exif::Tag;
+                                let d = match f.tag {
+                                    Tag::MakerNote |
+                                    Tag::UserComment |
+                                    Tag(exif::Context::Tiff,700) |
+                                    Tag(exif::Context::Tiff,59932) |
+                                    Tag(exif::Context::Exif,59932)
+                                                            => (color!(0xffafff),f.display_value().with_unit(f).to_string()[..20].to_string()),
 
-                                    text!("{}/{}: {}",f.ifd_num,f.tag,f.display_value().with_unit(f)).color(c).into()
-                                }
-                                else {
-                                    text!("MakerNote skipped").into()
-                                }
+                                    Tag::ImageDescription   => { (color!(0xFF8040),f.display_value().with_unit(f).to_string()) },
+
+                                    Tag::DateTime |
+                                    Tag::DateTimeOriginal |
+                                    Tag::DateTimeDigitized  => (color!(0xFFFFE0),f.display_value().with_unit(f).to_string()),
+                                    _                       => (color!(0xaFaFaF),f.display_value().with_unit(f).to_string()),
+                                };
+
+                                text!("{}/{}: {}",f.ifd_num,f.tag,d.1).color(d.0).into()
                             } )
                         )
                     )
