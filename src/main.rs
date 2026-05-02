@@ -36,9 +36,11 @@ use iced::widget::{
     stack,
     center,
     button,
+    hover,
     // center_x, center_y, checkbox,
     column,
     container,
+    scrollable,
     container::Style     as CStyle,
     progress_bar,
     progress_bar::Style  as PBStyle,
@@ -61,6 +63,7 @@ use iced::{
     border,
     color,
     keyboard,
+    clipboard,
     alignment::Vertical,
     alignment::Horizontal,
 };
@@ -105,6 +108,8 @@ enum Message {
     End,
     FullScreenToggle,
     Noop,
+    Clip(String),
+    ClipResult(Result<(), std::fmt::Error>),
     Goodbye,
     ByeToaster(usize),
 
@@ -416,6 +421,11 @@ impl QuickViewer {
         match event {
             Message::Noop     =>    { Task::none() },
             Message::Goodbye  =>    { iced::exit() },
+
+            Message::Clip(s)            => { clipboard::write(s) },
+            Message::ClipResult(Ok(_))  => { Task::none() },
+            Message::ClipResult(Err(e)) => { cprintln!("{e:?}"); Task::none() },
+
 
             Message::ByeToaster(idx) => {
                 self.toasts.remove(idx);
@@ -866,12 +876,32 @@ impl QuickViewer {
             Err(_) => 0
         };
 
-        let file_name = match self.img_list.item() {
-            Ok(n) => n.display(),
-            Err(_) => String::from(" ")
+        let fname = match self.img_list.item() {
+            Ok(n)   => n.display(),
+            Err(_)  => "".into()
+        };
+        let fqp = match self.img_list.item() {
+            Ok(n)   => n.fqp().display().to_string(),
+            Err(_)  => "".into()
         };
 
-        let file_name = text(file_name).size(self.args.font_size).color(color!(0xFDFD96)).wrapping(Wrapping::None);
+        let file_name =
+                text(fname.clone())
+                    .size(self.args.font_size)
+                    .color(color!(0xFDFD96))
+                    .wrapping(Wrapping::None);
+
+        let file_name_over =
+                container(
+                    row![
+                        button( text("fqp").size(self.args.font_size-2).color(color!(0x000000)) )
+                            .padding([0,5]).height(iced::Length::Fill).on_press(Message::Clip(fqp)),
+                        button( text("fn").size(self.args.font_size-2).color(color!(0x000000)) )
+                            .padding([0,5]).height(iced::Length::Fill).on_press(Message::Clip(fname))
+                    ].spacing(5)
+                );
+
+        let file_name = hover( file_name, file_name_over );
 
 
         let image_size = match self.img_list.item() {
@@ -984,38 +1014,55 @@ impl QuickViewer {
                 None      => { container( row![]) },
                 Some(exf) => {
                     container(
-                        table(
-                            [
-                                // table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.ifd_num).size(self.args.font_size).color(color!(0x7f7f7f)) ),
-                                table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.tag    ).size(self.args.font_size).color(color!(0xafafaf)) ),
-                                table::column(text!("").height(1), |f:&exif::Field| {
-                                    use exif::Tag;
-                                    let d = match f.tag {
-                                        Tag::MakerNote |
-                                        Tag::UserComment |
-                                        Tag(exif::Context::Tiff,700) |
-                                        Tag(exif::Context::Tiff,59932) |
-                                        Tag(exif::Context::Exif,59932)
-                                                                => (color!(0xffafff),f.display_value().with_unit(f).to_string()[..20].to_string()),
+                    scrollable(
+                    table(
+                        [
+                            // table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.ifd_num).size(self.args.font_size).color(color!(0x7f7f7f)) ),
+                            table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.tag    ).size(self.args.font_size).color(color!(0xafafaf)) ),
+                            table::column(text!("").height(1), |f:&exif::Field| {
+                                use exif::Tag;
+                                let d = match f.tag {
+                                    Tag::MakerNote                  |
+                                    Tag::UserComment                |
+                                    Tag(exif::Context::Tiff,700)    |
+                                    Tag(exif::Context::Tiff,50341)  |
+                                    Tag(exif::Context::Tiff,50898)  |
+                                    Tag(exif::Context::Tiff,50899)  |
+                                    Tag(exif::Context::Tiff,59932)  |
+                                    Tag(exif::Context::Exif,59932)  =>
+                                        (color!(0xff7f7f),format!("{}...",f.display_value().with_unit(f).to_string()[..40].to_string())),
 
-                                        Tag::ImageDescription   => (color!(0xFF8040),f.display_value().with_unit(f).to_string()),
+                                    Tag::ImageDescription           =>
+                                        (color!(0xFF8040),f.display_value().with_unit(f).to_string()),
 
-                                        Tag::DateTime |
-                                        Tag::DateTimeOriginal |
-                                        Tag::DateTimeDigitized  => (color!(0xFFFFD0),f.display_value().with_unit(f).to_string()),
-                                        _                       => (color!(0xbfbfbf),f.display_value().with_unit(f).to_string()),
-                                    };
+                                    Tag::DateTime                   |
+                                    Tag::DateTimeOriginal           |
+                                    Tag::DateTimeDigitized          =>
+                                        (color!(0xFFFFD0),f.display_value().with_unit(f).to_string()),
+                                    _                               =>
+                                        (color!(0xbfbfbf),f.display_value().with_unit(f).to_string()),
+                                };
 
-                                    text!("{}",d.1).color(d.0).size(self.args.font_size)
-                                })
-                            ],
-                            &mut exf.fields()
-                        )
-                        .padding_x(10)
-                        .padding_y(2)
-                        .separator_x(0)
-                        .separator_y(0)
-                    )
+
+                                let d = if d.1.len() > 80 {
+                                    (color!(0xff1f1f), format!("{:80.80}...",d.1) )
+                                }
+                                else
+                                {
+                                    d
+                                };
+
+                                mouse_area(text!("{}",d.1).color(d.0).size(self.args.font_size)).on_press(Message::Clip(f.display_value().with_unit(f).to_string()))
+                            })
+                        ],
+                        &mut exf.fields()
+                    ) // table
+                    .padding_x(10)
+                    .padding_y(2)
+                    .separator_x(0)
+                    .separator_y(0)
+                    )// scrollable
+                    )// container
                     .style( |_| {
                         CStyle {
                             background: Some(iced::Background::Color(iced::Color::from_rgba8(0, 0, 0,0.65))),
@@ -1055,7 +1102,7 @@ impl QuickViewer {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .align_x(Horizontal::Right)
-                .align_y(Vertical::Center)
+                .align_y(Vertical::Bottom)
             }
             else
             {
