@@ -70,6 +70,7 @@ use iced::{
 
 use std::collections::{ HashMap };
 use std::path::PathBuf;
+use std::cmp::max;
 
 use lru::LruCache;
 use std::num::NonZeroUsize as ImageKey;
@@ -434,14 +435,24 @@ impl QuickViewer {
 
 
             Message::FontDown => {
-                if self.args.font_size > 8
+                if self.args.font_size > 6
                 {
                     self.args.font_size -= 1;
+                }
+                else
+                {
+                    self.args.font_size = 0;
                 }
                 Task::none()
             },
             Message::FontUp => {
-                self.args.font_size += 1;
+                if self.args.font_size == 0 {
+                    self.args.font_size = 6;
+                }
+                else if self.args.font_size < 50
+                {
+                    self.args.font_size += 1;
+                }
                 Task::none()
             },
 
@@ -958,6 +969,7 @@ impl QuickViewer {
                 // Shows the pending cache load
                 let c = self.pending_image_requests.len();
                 let b = (self.args.look_ahead + self.args.look_behind) as f32;
+                if c > 0 {
                 row![
                     container(
                         progress_bar(0.0..=b,b-c as f32)
@@ -966,9 +978,9 @@ impl QuickViewer {
                             let t = theme.palette();
 
                             PBStyle{
-                                background: Background::Color(t.primary ),
-                                bar:        Background::Color(t.background ),
-                                border:     border::color(t.background).width(5.5),
+                                background: Background::Color(t.primary     ),
+                                bar:        Background::Color(t.background  ),
+                                border:     border::color(iced::Color::BLACK.scale_alpha(0.0)).width(5.5),
                             }
                         } )
                     )
@@ -976,12 +988,17 @@ impl QuickViewer {
                     .height(Length::Fill)
                     .height(15)
                     .align_x(text::Alignment::Right)
-                    .align_y(Vertical::Center)
+                    .align_y(Vertical::Bottom)
+                    .style(|x| iced::widget::container::background(Background::Color(color!(0).scale_alpha(0.0))) )
                     ,
                 ]
+            } else { row![] }
             };
 
-        let counter = if t == 0 {
+
+        let counter =
+        if self.args.font_size > 0 {
+        if t == 0 {
             row![ text!("No images").size(self.args.font_size).color(color!(0xC5B358)) ].height(20)
         } else {
             row![
@@ -1004,6 +1021,10 @@ impl QuickViewer {
                 container( image_dt )  .padding([0,5]),
                 container( file_name)  .padding([0,5]),
             ].height(iced::Length::Shrink)
+        }
+        }
+        else{
+            row![]
         };
 
         // EXIF info table
@@ -1018,7 +1039,7 @@ impl QuickViewer {
                     table(
                         [
                             // table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.ifd_num).size(self.args.font_size).color(color!(0x7f7f7f)) ),
-                            table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.tag    ).size(self.args.font_size).color(color!(0xafafaf)) ),
+                            table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.tag    ).size(max(self.args.font_size,10)).color(color!(0xafafaf)) ),
                             table::column(text!("").height(1), |f:&exif::Field| {
                                 use exif::Tag;
                                 let d = match f.tag {
@@ -1052,7 +1073,7 @@ impl QuickViewer {
                                     d
                                 };
 
-                                mouse_area(text!("{}",d.1).color(d.0).size(self.args.font_size)).on_press(Message::Clip(f.display_value().with_unit(f).to_string()))
+                                mouse_area(text!("{}",d.1).color(d.0).size(max(self.args.font_size,10))).on_press(Message::Clip(f.display_value().with_unit(f).to_string()))
                             })
                         ],
                         &mut exf.fields()
@@ -1138,14 +1159,15 @@ impl QuickViewer {
         };
         // let img = container(canvas(self).width(Fill).height(Fill));
 
-        let content = column![
-            img,
-            container(row![
-                row![ counter],
-                row![ progress_area ]
-            ])//.height(iced::Length::Fixed( (self.args.font_size+3) as f32))
-            .clip(true),
-        ];
+        let content =
+            stack![
+                column![
+                    img,
+                    container(counter).width(Fill),
+                ],
+                float(container(progress_area).width(Fill).height(Fill).align_y(Vertical::Bottom).align_x(Horizontal::Right))
+            ]
+        ;
 
         let stuff = if true {
             container( toast::Manager::new(content, &self.toasts, Message::ByeToaster)
