@@ -30,6 +30,7 @@ use std::hash::{Hash, Hasher};
 
 use iced::widget::{
     Container,
+    Row,
     table,
     Theme,
     float,
@@ -396,11 +397,13 @@ impl QuickViewer {
             return Task::none();
         };
 
-        self.current_image_handle = Some( ImageHandle::from_bytes( i.to_vec() ) );
+
 
         if Some(key) == self.show_when_loaded {
             let idx = self.img_list.find_index(key).expect("key not found");
             let _   = self.img_list.goto(idx).expect("key not valid");
+
+            self.current_image_handle = Some( ImageHandle::from_bytes( i.to_vec() ) );
 
             self.show_when_loaded = None;
 
@@ -954,46 +957,72 @@ impl QuickViewer {
             Some(_) => { color!(0xFF00FF)  }
         };
 
-        let progress_area = if self.scan_dir_task.is_some() { row![
-                    text(self.current_scan_dir.clone())
-                    .size(8)
-                    .color(color!(0xFFFFFF))
-                    .width(iced::Length::Fill)
-                    .height(iced::Length::Fill)
-                    .align_x(text::Alignment::Right)
-                    .align_y(Vertical::Center)
-                    .wrapping(Wrapping::None),
-                    button( text("stop").size(10) ).padding([0,2]).height(iced::Length::Shrink).on_press(Message::CancelFileFind)
-                ].spacing(10).padding([0,10]).height(iced::Length::Shrink)
-            } else {
-                // Shows the pending cache load
-                let c = self.pending_image_requests.len();
-                let b = (self.args.look_ahead + self.args.look_behind) as f32;
-                if c > 0 {
-                row![
-                    container(
-                        progress_bar(0.0..=b,b-c as f32)
-                        .length(50)
-                        .style( |theme:&Theme| {
-                            let t = theme.palette();
 
-                            PBStyle{
-                                background: Background::Color(t.primary     ),
-                                bar:        Background::Color(t.background  ),
-                                border:     border::color(iced::Color::BLACK.scale_alpha(0.0)).width(5.5),
-                            }
-                        } )
+        // type ScanRow<'a> = Row<'a, Message, Theme, Renderer>;
+        let scan_dir_progress = if self.scan_dir_task.is_some() {
+            container(
+                container(
+                row![
+                    button( text("stop").size(max(self.args.font_size,12)-2 )).padding([0,2]).height(iced::Length::Shrink).on_press(Message::CancelFileFind),
+                    container(
+                        text(self.current_scan_dir.clone())
+                            .size(max(self.args.font_size,12)-2)
+                            .color(color!(0xFFFFFF))
+                            .width(iced::Length::Fill)
+                            .height(iced::Length::Fill)
+                            .align_x(text::Alignment::Left)
+                            .align_y(Vertical::Center)
+                            .wrapping(Wrapping::None)
                     )
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .height(15)
-                    .align_x(text::Alignment::Right)
-                    .align_y(Vertical::Bottom)
-                    .style(|x| iced::widget::container::background(Background::Color(color!(0).scale_alpha(0.0))) )
+                    .width(Length::Shrink)
+
                     ,
-                ]
-            } else { row![] }
-            };
+                ].spacing(10).padding([0,10]).height(iced::Length::Shrink).width(iced::Length::Fill)
+                )
+                    .style( |_| {
+                        CStyle {
+                            background: Some(iced::Background::Color(iced::Color::from_rgba8(0, 0, 0,0.65))),
+                            ..CStyle::default()
+                        }
+                    })
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(text::Alignment::Left)
+            .align_y(Vertical::Bottom)
+
+        } else { container( row![] ) };
+
+        // Shows the pending cache load
+        let cache_status = if self.pending_image_requests.len() > 0 {
+            let c = self.pending_image_requests.len();
+            let b = (self.args.look_ahead + self.args.look_behind) as f32;
+            container(
+                progress_bar(0.0..=b,b-c as f32)
+                    .length(50)
+                    .style( |theme:&Theme| {
+                        let t = theme.palette();
+
+                        PBStyle{
+                            background: Background::Color(t.primary     ),
+                            bar:        Background::Color(t.background  ),
+                            border:     border::color(iced::Color::BLACK.scale_alpha(0.0)).width(5.5),
+                        }
+                    } )
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .height(15)
+                .align_x(text::Alignment::Right)
+                .align_y(Vertical::Bottom)
+                .style(|x| iced::widget::container::background(Background::Color(color!(0).scale_alpha(0.0)))
+            )
+
+                // ,
+            // ]
+        }
+        else { container( row![] ) };
+
 
 
         let counter =
@@ -1015,7 +1044,7 @@ impl QuickViewer {
                         .size(self.args.font_size)
                         .color(color!(0x536878))
                         .font(Font::MONOSPACE)
-                )                       ,
+                ),
                 container( image_size ).padding([0,5]),
                 container( image_dim ) .padding([0,5]),
                 container( image_dt )  .padding([0,5]),
@@ -1029,7 +1058,7 @@ impl QuickViewer {
 
         // EXIF info table
         type Tbl<'a> = Container<'a, Message, Theme, Renderer>;
-        let exf:Tbl =
+        let exif_info:Tbl =
         if self.args.view_exif {
             match self.has_exif() {
                 None      => { container( row![]) },
@@ -1096,7 +1125,7 @@ impl QuickViewer {
         else { container(row![]) };
 
 
-        let dbg = if self.args.view_cache_look_ahead {
+        let cache_load_display = if self.args.view_cache_look_ahead {
             if self.pending_image_requests.len() > 0 {
                 container(
                     container(
@@ -1145,27 +1174,31 @@ impl QuickViewer {
         };
 
         let img = if self.zoom {
-            container(viewer(h).width(Fill).height(Fill))
+            container( viewer(h).width(Fill).height(Fill) )
         }
         else {
-            container(
-                stack![
-                    iced_image(h).width(Fill).height(Fill),
-                    float( dbg ),
-                    float( exf ),
-
-                ].width(Fill).height(Fill)
-            )
+            container( iced_image(h).width(Fill).height(Fill) )
         };
         // let img = container(canvas(self).width(Fill).height(Fill));
 
         let content =
             stack![
                 column![
-                    img,
+                    stack![
+                        img,
+                        float( cache_load_display ),
+                        float( exif_info ),
+                        float( scan_dir_progress ),
+                    ],
                     container(counter).width(Fill),
                 ],
-                float(container(progress_area).width(Fill).height(Fill).align_y(Vertical::Bottom).align_x(Horizontal::Right))
+                float(
+                    container(cache_status)
+                        .width(Fill)
+                        .height(Fill)
+                        .align_y(Vertical::Bottom)
+                        .align_x(Horizontal::Right)
+                )
             ]
         ;
 
