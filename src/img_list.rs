@@ -400,6 +400,7 @@ impl ImageList {
         Ok(())
     }
 
+    #[allow(unused)]
     pub fn sort_by<F>(&mut self, compare: F) -> Result<(),ImageError>
     where
         F: FnMut(&ImageKey, &ImageKey)-> Ordering

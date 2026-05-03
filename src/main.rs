@@ -30,7 +30,7 @@ use std::hash::{Hash, Hasher};
 
 use iced::widget::{
     Container,
-    Row,
+    // Row,
     table,
     Theme,
     float,
@@ -111,6 +111,7 @@ enum Message {
     FullScreenToggle,
     Noop,
     Clip(String),
+    #[allow(unused)]
     ClipResult(Result<(), std::fmt::Error>),
     Goodbye,
     ByeToaster(usize),
@@ -427,8 +428,9 @@ impl QuickViewer {
             Message::Goodbye  =>    { iced::exit() },
 
             Message::Clip(s)            => { clipboard::write(s) },
-            Message::ClipResult(Ok(_))  => { Task::none() },
-            Message::ClipResult(Err(e)) => { cprintln!("{e:?}"); Task::none() },
+            Message::ClipResult(_)  => { Task::none() },
+            // Message::ClipResult(Ok(_))  => { Task::none() },
+            // Message::ClipResult(Err(e)) => { cprintln!("{e:?}"); Task::none() },
 
 
             Message::ByeToaster(idx) => {
@@ -958,33 +960,32 @@ impl QuickViewer {
         };
 
 
-        // type ScanRow<'a> = Row<'a, Message, Theme, Renderer>;
         let scan_dir_progress = if self.scan_dir_task.is_some() {
             container(
                 container(
-                row![
-                    button( text("stop").size(max(self.args.font_size,12)-2 )).padding([0,2]).height(iced::Length::Shrink).on_press(Message::CancelFileFind),
-                    container(
-                        text(self.current_scan_dir.clone())
-                            .size(max(self.args.font_size,12)-2)
-                            .color(color!(0xFFFFFF))
-                            .width(iced::Length::Fill)
-                            .height(iced::Length::Fill)
-                            .align_x(text::Alignment::Left)
-                            .align_y(Vertical::Center)
-                            .wrapping(Wrapping::None)
-                    )
-                    .width(Length::Shrink)
+                    row![
+                        button( text("stop").size(max(self.args.font_size,12)-2 )).padding([0,2]).height(iced::Length::Shrink).on_press(Message::CancelFileFind),
+                        container(
+                            text(self.current_scan_dir.clone())
+                                .size(max(self.args.font_size,12)-2)
+                                .color(color!(0xFFFFFF))
+                                .width(iced::Length::Fill)
+                                .height(iced::Length::Fill)
+                                .align_x(text::Alignment::Left)
+                                .align_y(Vertical::Center)
+                                .wrapping(Wrapping::None)
+                        )
+                        .width(Length::Shrink)
 
-                    ,
-                ].spacing(10).padding([0,10]).height(iced::Length::Shrink).width(iced::Length::Fill)
+                        ,
+                    ].spacing(10).padding([0,10]).height(iced::Length::Shrink).width(iced::Length::Fill)
                 )
-                    .style( |_| {
-                        CStyle {
-                            background: Some(iced::Background::Color(iced::Color::from_rgba8(0, 0, 0,0.65))),
-                            ..CStyle::default()
-                        }
-                    })
+                .style( |_| {
+                    CStyle {
+                        background: Some(iced::Background::Color(iced::Color::from_rgba8(0, 0, 0,0.65))),
+                        ..CStyle::default()
+                    }
+                })
             )
             .width(Length::Fill)
             .height(Length::Fill)
@@ -1011,15 +1012,9 @@ impl QuickViewer {
                     } )
                 )
                 .width(Length::Fill)
-                .height(Length::Fill)
                 .height(15)
                 .align_x(text::Alignment::Right)
                 .align_y(Vertical::Bottom)
-                .style(|x| iced::widget::container::background(Background::Color(color!(0).scale_alpha(0.0)))
-            )
-
-                // ,
-            // ]
         }
         else { container( row![] ) };
 
