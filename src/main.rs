@@ -907,9 +907,9 @@ impl QuickViewer {
             Err(_) => 0
         };
 
-        let fname = match self.img_list.item() {
-            Ok(n)   => n.display(),
-            Err(_)  => "".into()
+        let (group,fname) = match self.img_list.item() {
+            Ok(n)   => (n.group(),n.name()),
+            Err(_)  => ("".into(),"".into())
         };
         let fqp = match self.img_list.item() {
             Ok(n)   => n.fqp().display().to_string(),
@@ -917,10 +917,21 @@ impl QuickViewer {
         };
 
         let file_name =
-                text(fname.clone())
-                    .size(self.args.font_size)
-                    .color(color!(0xFDFD96))
-                    .wrapping(Wrapping::None);
+                container(
+                    row![
+                        text(group)
+                            .size(self.args.font_size)
+                            .color(color!(0xaDaD96))
+                            .wrapping(Wrapping::None),
+                        text("/")
+                            .color(color!(0xffffff))
+                            .size(self.args.font_size),
+                        text(fname)
+                            .size(self.args.font_size)
+                            .color(color!(0xFDFD96))
+                            .wrapping(Wrapping::None)
+                    ]
+                );
 
         let file_name_over =
                 container(
@@ -928,7 +939,7 @@ impl QuickViewer {
                         button( text("fqp").size(self.args.font_size-2).color(color!(0x000000)) )
                             .padding([0,5]).height(iced::Length::Fill).on_press(Message::Clip(fqp)),
                         button( text("fn").size(self.args.font_size-2).color(color!(0x000000)) )
-                            .padding([0,5]).height(iced::Length::Fill).on_press(Message::Clip(fname))
+                            .padding([0,5]).height(iced::Length::Fill).on_press(Message::Clip(fname.into()))
                     ].spacing(5)
                 );
 
@@ -952,7 +963,11 @@ impl QuickViewer {
             Err(_)  =>          format!("{0:>6}   {0:>6}","")
         };
 
-        let image_dim = text(image_dim).size(self.args.font_size).color(color!(0xFD5E53)).font(Font::MONOSPACE);
+        let image_dim = text(image_dim)
+                            .wrapping(Wrapping::None)
+                            .size(self.args.font_size)
+                            .color(color!(0xFD5E53))
+                            .font(Font::MONOSPACE);
 
         let image_dt = match self.best_date() {
             Some(d) => (d,color!(0xE1A95F)),
@@ -967,7 +982,10 @@ impl QuickViewer {
             }
         };
 
-        let image_dt = text(image_dt.0).size(self.args.font_size).color(image_dt.1);//.font(Font::MONOSPACE);
+        let image_dt = text(image_dt.0)
+                        .wrapping(Wrapping::None)
+                        .size(self.args.font_size)
+                        .color(image_dt.1);
 
         let clr = match self.show_when_loaded {
             None    => { color!(0xF5F5F5)  }
