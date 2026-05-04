@@ -11,7 +11,7 @@ const MIN_DELAY: u64 = 5;
 
 use toast::{Toast};
 
-use crate::list_files::SomeFiles;
+use crate::list_files::ScanProgress;
 
 use crate::img_traits::{ImageError,LoadData};
 use crate::list_files::{FileSystemHelper};
@@ -121,7 +121,7 @@ enum Message {
     ImageCached( ImageKey, Result<ImageAllocation,AllocError> ),
 
     FindFilesOnPath,
-    FoundSomeFiles(SomeFiles),
+    FindFilesProgress(ScanProgress),
     FileFindComplete ,
     CancelFileFind,
 
@@ -601,12 +601,27 @@ impl QuickViewer {
             }
 
 
-            Message::FoundSomeFiles(p) => {
-                self.current_scan_dir   = p.current_dir;
+            Message::FindFilesProgress(p) => {
 
-                if self.img_list.is_empty() && !p.files.is_empty() {
+                let list = match p {
+                    ScanProgress::CurrentDir(d) => { self.current_scan_dir=d; return Task::none(); }
+                    ScanProgress::SomeFiles(l)  => l,
+                    // ScanProgress::More(d) => {
+                    //     // cprintln!("~[c51]{d21}");
+                    //     self.current_scan_dir=d.clone();
+                    //     let (m,h) = Task::sip(
+                    //         FileSystemHelper::find_files_sipper(vec![d],1),
+                    //         Message::FindFilesProgress,
+                    //         | _e | { Message::FileFindComplete }
+                    //     ).abortable();
+                    //     return m;
+                    // }
 
-                    self.img_list.append(p.files);
+                };
+
+                if self.img_list.is_empty() && !list.is_empty() {
+
+                    self.img_list.append(list);
 
                     let next_image = match self.img_list.first() {
                         Ok(i) => i,
@@ -617,7 +632,7 @@ impl QuickViewer {
                 }
                 else
                 {
-                    self.img_list.append(p.files);
+                    self.img_list.append(list);
                     Task::none()
                 }
             },
@@ -641,7 +656,7 @@ impl QuickViewer {
             Message::FindFilesOnPath => {
                 let (m,h) = Task::sip(
                     FileSystemHelper::find_files_sipper(self.args.dirs.clone(),self.args.max_depth),
-                    Message::FoundSomeFiles,
+                    Message::FindFilesProgress,
                     | _e | { Message::FileFindComplete }
                 ).abortable();
 
