@@ -220,34 +220,31 @@ impl FileSystemHelper {
                 let path = PathBuf::from(&dir);
 
                 if dir.contains(['*','?','[']) {
-                    // ee_conio::cprintln!("glob ~[c70]{}",dir);
-
-                    let mut pbj = PathBuf::new();
-                    let mut pbh = PathBuf::new();
+                    let mut pb_root  = PathBuf::new();
+                    let mut pb_match = PathBuf::new();
 
                     let mut got_root = false;
 
                     for c in path.components() {
-                        // ee_conio::cprintln!("{c:?}");
 
                         let x1 = match c {
                             Component::Normal(c) => c.to_str().unwrap(),
                             _ => "",
                         };
 
-                        pbh.push(c);
+                        pb_match.push(c);
 
                         if !got_root && !x1.contains(['*','?','[']) {
-                            pbj.push(c);
+                            pb_root.push(c);
                         }
                         else {
                             got_root = true;
                         }
                     }
 
-                    let glob = match GlobBuilder::new(pbh.to_str().unwrap()).literal_separator(false).build() { Ok(g) => g, Err(_) => continue }.compile_matcher();
+                    let glob = match GlobBuilder::new(pb_match.to_str().unwrap()).case_insensitive(true).build() { Ok(g) => g, Err(_) => continue }.compile_matcher();
 
-                    dirs.push( (pbj,Some(glob) ) );
+                    dirs.push( (pb_root,Some(glob) ) );
                 }
 
                 if path.is_dir() {
@@ -258,17 +255,15 @@ impl FileSystemHelper {
                 else if path.is_file() {
                     match FileSystemImage::from_cl(path.to_path_buf() ) {
                         Ok(mut i) => {
-                            let y = path.as_path();
+                                let y = path.as_path();
 
                             let (size,ftime) = match y.metadata() {
                                 Ok(s) => (s.len(),s.created().unwrap()),
                                 Err(_) => (0,std::time::SystemTime::now())
                             };
 
-                            i.size = size;
+                            i.size  = size;
                             i.ftime = ftime.into();
-
-                            // ee_conio::cprintln!("i:?");
 
                             items.push_back( i )
                         },
@@ -284,13 +279,9 @@ impl FileSystemHelper {
             for dp in dirs {
                 progress.send( ScanProgress::CurrentDir(dp.0.display().to_string()) ).await;
 
-                let path = PathBuf::from(dp.0);
-
-                let mut sent:usize = 0;
-
                 use walkdir::{ DirEntry };
 
-                fn filter(gm:&Option<GlobMatcher>) -> impl FnMut(&DirEntry) -> bool {
+                fn walkdir_filter(gm:&Option<GlobMatcher>) -> impl FnMut(&DirEntry) -> bool {
                     |e| {
                         if e.depth() > 0 {
                             match gm {
@@ -307,10 +298,14 @@ impl FileSystemHelper {
                     }
                 }
 
+                let path = PathBuf::from(dp.0);
+
+                let mut sent:usize = 0;
+
                 for entry in WalkDir::new(&path)
                                 .max_depth(max_depth)
                                 .into_iter()
-                                .filter_entry( filter(&dp.1) )
+                                .filter_entry( walkdir_filter(&dp.1) )
                                 .filter_map( |e| e.ok()  )
                 {
                     if entry.file_type().is_dir() && entry.depth()>0 {
@@ -351,7 +346,14 @@ impl FileSystemHelper {
                         }
                     }
 
-                    if items.len()> if sent < 10000 { 99 } else { 999 } {
+                    let drain_it = match sent {
+                            0           => 0,
+                            1..100      => 98,
+                            100..10000  => 99,
+                            10000..     => 999,
+                    };
+
+                    if items.len() > drain_it {
                         sent += items.len();
                         progress.send( drain(& mut items) ).await;
                     }
