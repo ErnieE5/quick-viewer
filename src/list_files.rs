@@ -7,14 +7,15 @@ use std::fmt;
 use std::fmt::{Display,Formatter};
 use std::num::NonZeroUsize;
 
-use crate::img_traits::{  ImageDyn, ImageOrigin };
+use crate::img_traits::{  ImageDyn, ImageOrigin, LoadData };
 use std::path::{PathBuf};
+use std::time::{Instant};
 
 use image::ImageReader;
 use std::fs::File;
-use std::io::Cursor;
-use std::io::Read;
+use std::io::{ Seek, SeekFrom };
 
+use iced::Size;
 use iced::task::{Straw, sipper};
 use std::collections::{VecDeque};
 
@@ -22,14 +23,16 @@ use walkdir::WalkDir;
 
 use iced::widget::image::Handle as ImageHandle;
 
+use exif::Reader as ExifReader;
 
 #[derive(Debug, Clone)]
 pub struct FileSystemImage {
     fqp:        PathBuf,
     origin:     String,
-    set:        String,
+    group:      String,
     name:       String,
-    index:      u64,
+    size:       u64,
+    ftime:      time::UtcDateTime,
 }
 
 
@@ -43,7 +46,7 @@ impl FileSystemImage {
             Err(_)  => { return Err(ImageError::Unexpected); }
         };
 
-        let set = match sub.parent() {
+        let group = match sub.parent() {
             Some(r)   => r,
             None      => { return Err(ImageError::Unexpected); }
         };
@@ -55,10 +58,11 @@ impl FileSystemImage {
 
         Ok( FileSystemImage {
             origin: origin.display().to_string(),
-            set:    set.display().to_string(),
+            group:  group.display().to_string(),
             name:   name.display().to_string(),
             fqp,
-            index:0
+            size: 0,
+            ftime: time::UtcDateTime::MIN,
         } )
     }
 
@@ -76,7 +80,7 @@ impl ImageOrigin for FileSystemImage {
     }
 
     fn display(&self) -> String {
-        let s = PathBuf::new().join(&self.set).join(&self.name);
+        let s = PathBuf::new().join(&self.group).join(&self.name);
         let o = match s.to_str() {
             Some(s) => s,
             None => ""
@@ -84,23 +88,28 @@ impl ImageOrigin for FileSystemImage {
         o.to_string()
     }
 
-    fn set(&self) -> &str {
-        self.set.as_str()
+    fn group(&self) -> &str {
+        self.group.as_str()
     }
 
     fn name(&self) -> &str {
         self.name.as_str()
     }
 
-    fn get_index(&self) -> u64 {
-        self.index
+    fn size(&self) -> u64 {
+        self.size
+    }
+
+    fn ftime(&self) -> time::UtcDateTime {
+        self.ftime.truncate_to_second()
+        // time::macros::utc_datetime!(1970-01-05 10:11)
     }
 }
 
 
 impl Ord for FileSystemImage {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.index.cmp(&other.index)
+        self.fqp.cmp(&other.fqp)
     }
 }
 
@@ -112,7 +121,7 @@ impl PartialOrd for FileSystemImage {
 
 impl PartialEq for FileSystemImage {
     fn eq(&self, other: &Self) -> bool {
-        self.index == other.index
+        self.fqp == other.fqp
     }
 }
 
@@ -121,7 +130,7 @@ impl Eq for FileSystemImage {}
 impl Display for FileSystemImage {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
     {
-        let s = PathBuf::new().join(&self.set).join(&self.name);
+        let s = PathBuf::new().join(&self.group).join(&self.name);
         let o = match s.to_str() {
             Some(s) => s,
             None => ""
@@ -150,6 +159,8 @@ static EXTENSIONS: &'static [&'static str] = &[
     "GIF", "webp"
 ];
 
+
+
 type FsiVec = VecDeque<FileSystemImage>;
 
 impl FileSystemHelper {
@@ -175,7 +186,7 @@ impl FileSystemHelper {
                     }
 
                     match msg.files.last() {
-                        Some(s) => { msg.current_dir = s.set().to_string() },
+                        Some(s) => { msg.current_dir = s.group().to_string() },
                         None    => ()
                     };
 
@@ -189,9 +200,9 @@ impl FileSystemHelper {
                     .into_iter()
                     .filter_map( |e| { e.ok() } )
                 {
-                    let _size = match entry.metadata() {
-                        Ok(s) => s.len(),
-                        Err(_) => 0
+                    let (size,ftime) = match entry.metadata() {
+                        Ok(s) => (s.len(),s.created().unwrap()),
+                        Err(_) => (0,std::time::SystemTime::now())
                     };
 
                     let ext = match entry.path().extension() {
@@ -205,7 +216,13 @@ impl FileSystemHelper {
 
                     if entry.file_type().is_file() {
                         match FileSystemImage::new(&path, entry.path().to_path_buf() ) {
-                            Ok(i) => { items.push_back( i ) },
+                            Ok(mut i) => {
+
+                                i.size = size;
+                                i.ftime = ftime.into();
+
+                                items.push_back( i )
+                            },
                             Err(_) => { continue; }
                         }
                     }
@@ -223,25 +240,47 @@ impl FileSystemHelper {
         })
     }
 
-    pub async fn load_image(fqp:PathBuf,id: NonZeroUsize)
-        -> Result<(NonZeroUsize, ImageHandle), ImageError> {
+    pub async fn load_image(fqp:PathBuf,id:NonZeroUsize)
+        -> Result<LoadData, ImageError> {
 
         let _ext = match fqp.as_path().extension() {
             Some(ext) => match ext.to_str() { None => { "" }, Some(ext) => ext, }
             None => { "" }
         };
 
-        let mut file = match File::open(&fqp) {
+        let open = Instant::now();
+        let file = match File::open(&fqp) {
             Ok(f) => f,
             Err(_e) => { return Err(ImageError::ErrorOpeningImageFile(id)); }
         };
+        let open = open.elapsed();
 
-        let mut buffer = Vec::new();
-        let Ok(_) = file.read_to_end(&mut buffer) else {
-            return Err(ImageError::ErrorReadingImageFile(id));
+        tokio::task::yield_now().await;
+
+
+        let read = Instant::now();
+
+        let mut bufreader = std::io::BufReader::new(&file);
+
+        let exifreader = ExifReader::new();
+
+        let exif = match exifreader.read_from_container(&mut bufreader) {
+            Ok(exif) => { Some(exif) },
+            Err(_)   => { None }
         };
 
-        let Ok(reader) = ImageReader::new(Cursor::new(buffer)).with_guessed_format() else {
+        match bufreader.seek(SeekFrom::Start(0)) {
+            Ok(_)   => { },
+            Err(_e) => { return Err(ImageError::ErrorReadingImageFile(id)); }
+        }
+
+        let read = read.elapsed();
+
+
+        tokio::task::yield_now().await;
+
+        let decode = Instant::now();
+        let Ok(reader) = ImageReader::new(bufreader).with_guessed_format() else {
             return Err(ImageError::ErrorGuessingFormat(id));
         };
 
@@ -251,13 +290,26 @@ impl FileSystemHelper {
                 return Err(ImageError::ErrorDecodingImage(id));
             }
         };
+        let decode = decode.elapsed();
+
+        tokio::task::yield_now().await;
 
         let width   = image.width();
         let height  = image.height();
         let data    = image.to_rgba8().into_raw();
         let handle  = ImageHandle::from_rgba(width, height, data);
 
-        Ok((id, handle))
+        let r = LoadData {
+            id,
+            handle: Some(handle),
+            open,
+            read,
+            decode,
+            dimensions:Size::new(width,height),
+            exif
+        };
+
+        Ok( r )
     }
 
 }

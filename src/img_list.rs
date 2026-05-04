@@ -7,6 +7,7 @@ use std::ops::{RangeBounds,Bound};
 use std::collections::{HashMap};
 
 use std::num::NonZeroUsize;
+use std::cmp::Ordering;
 
 use crate::img_traits::{ ImageDyn, ImageError, };
 
@@ -21,8 +22,6 @@ pub struct ImageList {
     next_key:   ImageKey,
 }
 
-
-#[derive(Debug)]
 pub struct PeekWalker {
     pos:    NonZeroUsize,
     total:  NonZeroUsize,
@@ -55,11 +54,10 @@ impl Iterator for PeekWalker {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.count > 0 {
-            // ee_conio::cprintln!("pos {}",self.pos);
             if self.pos < self.total {
                 self.pos = self.pos.checked_add(1).expect("reality");
             } else {
-                self.pos = NonZeroUsize::new(1).expect("one must not be zero");
+                self.pos = NonZeroUsize::MIN;
             }
 
             self.count-=1;
@@ -94,7 +92,7 @@ impl ImageList {
     // }
 
     pub fn to_external_index(&self) -> NonZeroUsize {
-        NonZeroUsize::new(self.list_index+1).expect("one must not be zero")
+        NonZeroUsize::new(self.list_index+1).expect("list index not negative")
     }
 
     pub fn first(&mut self) -> Result<NonZeroUsize,ImageError> {
@@ -131,7 +129,7 @@ impl ImageList {
     {
         match self.list.len() > 0 {
             false => Err(ImageError::NoImages),
-            true  => Ok( NonZeroUsize::new(self.list.len()).expect("") )
+            true  => Ok( NonZeroUsize::new(self.list.len()).expect("len is not zero") )
         }
     }
 
@@ -143,7 +141,7 @@ impl ImageList {
         let t = match self.total_items() {
             Ok(i) => i,
             Err(_) => {
-                let one = NonZeroUsize::new(1).expect("reality");
+                let one = NonZeroUsize::MIN;
                 return PeekWalker::new( one, one, 0 );
             }
         };
@@ -173,7 +171,7 @@ impl ImageList {
             pos=1;
         }
 
-        let pos = NonZeroUsize::new(pos as usize).expect("value must not be zero");
+        let pos = NonZeroUsize::new(pos as usize).expect("pos is a positive non zero value");
 
         PeekWalker::new( pos ,t, count.try_into().unwrap() )
     }
@@ -293,7 +291,7 @@ impl ImageList {
 
     pub fn find_index(&mut self,key:NonZeroUsize) -> Result<NonZeroUsize,ImageError> {
         match self.list.iter().position(|&i| i==key) {
-            Some(idx) => Ok( NonZeroUsize::new(idx+1).expect("bad stuff happened") ),
+            Some(idx) => Ok( NonZeroUsize::new(idx+1).expect("index value must be non-negative") ),
             None => { return Err(ImageError::InvalidItemKey); }
         }
     }
@@ -306,6 +304,64 @@ impl ImageList {
         let cur = self.list[idx];
 
         fastrand::shuffle(&mut self.list);
+
+        self.list_index = match self.list.iter().position(|&i| i==cur) {
+            Some(idx) => idx,
+            None => { return Err(ImageError::Unexpected); }
+        };
+
+        Ok(())
+    }
+
+    pub fn sort_size(&mut self) -> Result<(),ImageError> {
+        if self.list.is_empty() {
+            return Err(ImageError::Uninitialized);
+        }
+        let idx = self.list_index;
+        let cur = self.list[idx];
+
+        self.list.sort_by( |a,b| {
+
+            let aa = match self.store.get(a) {
+                Some(a) => a.size(),
+                None => { todo!(); }
+            };
+            let bb = match self.store.get(b) {
+                Some(b) => b.size(),
+                None  => { todo!(); }
+            };
+
+            aa.cmp(&bb)
+        });
+
+        self.list_index = match self.list.iter().position(|&i| i==cur) {
+            Some(idx) => idx,
+            None => { return Err(ImageError::Unexpected); }
+        };
+
+        Ok(())
+    }
+
+    pub fn sort_date(&mut self) -> Result<(),ImageError> {
+        if self.list.is_empty() {
+            return Err(ImageError::Uninitialized);
+        }
+        let idx = self.list_index;
+        let cur = self.list[idx];
+
+        self.list.sort_by( |a,b| {
+
+            let aa = match self.store.get(a) {
+                Some(a) => a.ftime(),
+                None => { todo!(); }
+            };
+            let bb = match self.store.get(b) {
+                Some(b) => b.ftime(),
+                None  => { todo!(); }
+            };
+
+            aa.cmp(&bb)
+        });
 
         self.list_index = match self.list.iter().position(|&i| i==cur) {
             Some(idx) => idx,
@@ -344,6 +400,30 @@ impl ImageList {
         Ok(())
     }
 
+    #[allow(unused)]
+    pub fn sort_by<F>(&mut self, compare: F) -> Result<(),ImageError>
+    where
+        F: FnMut(&ImageKey, &ImageKey)-> Ordering
+    {
+
+        if self.list.is_empty() {
+            return Err(ImageError::Uninitialized);
+        }
+        let idx = self.list_index;
+        let cur = self.list[idx];
+
+        self.list.sort_by( compare );
+
+        self.list_index = match self.list.iter().position(|&i| i==cur) {
+            Some(idx) => idx,
+            None => { return Err(ImageError::Unexpected); }
+        };
+
+        Ok(())
+
+
+    }
+
 }
 
 impl Display for ImageList
@@ -377,7 +457,7 @@ impl ImageList {
             store:      HashMap::new(),
             list:       Vec::new(),
             list_index: 0,
-            next_key:   NonZeroUsize::new(0x10000EE5).expect("math working"),
+            next_key:   NonZeroUsize::new(0x10000EE5).expect("reality to be consistent"),
         }
     }
 

@@ -9,15 +9,15 @@ use clap::Parser;
 pub struct Args {
 
     /// start full screen
-    #[arg(long, visible_alias="fs")]
+    #[arg(long, short='F', visible_alias="fs")]
     pub fullscreen: bool,
 
     /// start in slideshow mode
-    #[arg(long,short)]
+    #[arg(long,short='S',)]
     pub slideshow: bool,
 
-    /// delay to advance a slideshow
-    #[arg(long, default_value_t=1000, value_parser=clap::value_parser!(u64).range(crate::MIN_DELAY..86_400_00))]
+    /// delay to advance a slideshow in milliseconds
+    #[arg(long,value_name="DELAY", default_value_t=1000, value_parser=clap::value_parser!(u64).range(crate::MIN_DELAY..86_400_00))]
     pub delay: u64,
 
 
@@ -29,7 +29,7 @@ pub struct Args {
 
 
     /// number of images to keep around
-    #[arg(long, default_value_t=30)]
+    #[arg(long, default_value_t=20)]
     pub cache_size:usize,
 
 
@@ -46,13 +46,22 @@ pub struct Args {
     #[arg(long)]
     pub window_frames: bool,
 
+    #[arg(long)]
+    pub view_cache_look_ahead:bool,
+
+    #[arg(long)]
+    pub view_exif:bool,
+
     /// Cache look ahead
-    #[arg(long, default_value_t=10)]
+    #[arg(long, default_value_t=5)]
     pub look_ahead: isize,
 
     /// Cache look behind
-    #[arg(long, default_value_t=10)]
+    #[arg(long, default_value_t=5)]
     pub look_behind: isize,
+
+    #[arg(long, default_value_t=12)]
+    pub font_size: u32,
 
     /// emit time of a full loop through images
     #[arg(long)]
