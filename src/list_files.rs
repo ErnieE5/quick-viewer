@@ -219,10 +219,6 @@ impl FileSystemHelper {
             for dir in &args {
                 let path = PathBuf::from(&dir);
 
-                // if path.is_relative() {
-                //      ee_conio::cprint!("~[c178]relative ");
-                // }
-
                 if dir.contains(['*','?','[']) {
                     // ee_conio::cprintln!("glob ~[c70]{}",dir);
 
@@ -251,22 +247,17 @@ impl FileSystemHelper {
 
                     let glob = match GlobBuilder::new(pbh.to_str().unwrap()).literal_separator(false).build() { Ok(g) => g, Err(_) => continue }.compile_matcher();
 
-                    // ee_conio::cprintln!("{}\n{}\n{glob:?}",pbj.display(),pbh.display());
-
                     dirs.push( (pbj,Some(glob) ) );
                 }
 
                 if path.is_dir() {
-                    // ee_conio::cprintln!("dir ~[c208]{}",path.display());
                     dirs.push( (dir.into(),None) );
                 }
 
 
                 else if path.is_file() {
-                    ee_conio::cprintln!("file ~[c51]{:?}",path);
                     match FileSystemImage::from_cl(path.to_path_buf() ) {
                         Ok(mut i) => {
-
                             let y = path.as_path();
 
                             let (size,ftime) = match y.metadata() {
@@ -277,7 +268,7 @@ impl FileSystemHelper {
                             i.size = size;
                             i.ftime = ftime.into();
 
-                            ee_conio::cprintln!("i:?");
+                            // ee_conio::cprintln!("i:?");
 
                             items.push_back( i )
                         },
@@ -297,18 +288,21 @@ impl FileSystemHelper {
 
                 let mut sent:usize = 0;
 
-                use walkdir::{ DirEntry, Error };
+                use walkdir::{ DirEntry };
 
-                fn the_filter(gm:Option<GlobMatcher>) -> impl FnMut(Result<DirEntry,Error>) -> Option<DirEntry> {
-                    move |e| {
-                        match &gm {
-                            Some(gm) => {
-                                match e {
-                                    Ok(e) => if gm.is_match(e.path().display().to_string()) { Some(e) } else {None} ,
-                                    Err(_) => None
-                                }
+                fn filter(gm:&Option<GlobMatcher>) -> impl FnMut(&DirEntry) -> bool {
+                    |e| {
+                        if e.depth() > 0 {
+                            match gm {
+                                Some(gm) => {
+                                    let item = e.path().display().to_string();
+                                    gm.is_match(item)
+                                },
+                                None     => true
                             }
-                            None => { e.ok() }
+                        }
+                        else {
+                            true
                         }
                     }
                 }
@@ -316,7 +310,8 @@ impl FileSystemHelper {
                 for entry in WalkDir::new(&path)
                                 .max_depth(max_depth)
                                 .into_iter()
-                                .filter_map( the_filter(dp.1) )
+                                .filter_entry( filter(&dp.1) )
+                                .filter_map( |e| e.ok()  )
                 {
                     if entry.file_type().is_dir() && entry.depth()>0 {
                         let stat = match entry.path().strip_prefix(&path) {
