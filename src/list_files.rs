@@ -8,7 +8,7 @@ use std::fmt::{Display,Formatter};
 use std::num::NonZeroUsize;
 
 use crate::img_traits::{  ImageDyn, ImageOrigin, LoadData };
-use std::path::{PathBuf};
+use std::path::{PathBuf,Component};
 use std::time::{Instant};
 
 use image::ImageReader;
@@ -37,11 +37,11 @@ pub struct FileSystemImage {
 
 
 impl FileSystemImage {
-    pub fn new(origin:&PathBuf,file:PathBuf) -> Result<FileSystemImage,ImageError> {
+    pub fn from_origin(origin:&PathBuf,fqp:PathBuf) -> Result<FileSystemImage,ImageError> {
 
-        let fqp     = file.clone();
+        let fqp     = fqp.clone();
 
-        let sub = match file.strip_prefix(origin) {
+        let sub = match fqp.strip_prefix(origin) {
             Ok(r)   => r,
             Err(_)  => { return Err(ImageError::Unexpected); }
         };
@@ -66,6 +66,24 @@ impl FileSystemImage {
         } )
     }
 
+    pub fn from_cl(file:PathBuf) -> Result<FileSystemImage,ImageError>
+    {
+        let fqp  = file.canonicalize().unwrap();
+
+        let name = match file.file_name() {
+            Some(r)   => r,
+            None      => { return Err(ImageError::Unexpected); }
+        };
+
+        Ok( FileSystemImage {
+            origin: "".into(),
+            group:  "".into(),
+            name:   name.display().to_string(),
+            fqp,
+            size: 0,
+            ftime: time::UtcDateTime::MIN,
+        } )
+    }
 
 }
 
@@ -102,7 +120,6 @@ impl ImageOrigin for FileSystemImage {
 
     fn ftime(&self) -> time::UtcDateTime {
         self.ftime.truncate_to_second()
-        // time::macros::utc_datetime!(1970-01-05 10:11)
     }
 }
 
@@ -145,11 +162,19 @@ pub struct FileSystemHelper {
 
 }
 
+
 #[derive(Clone,Debug)]
-pub struct SomeFiles {
-    pub current_dir:    String,
-    pub files:          Vec<Box<dyn ImageDyn>>,
+pub enum ScanProgress {
+    SomeFiles(Vec<Box<dyn ImageDyn>>),
+    CurrentDir(String),
+    // More(String),
 }
+
+// #[derive(Clone,Debug)]
+// pub struct SomeFiles {
+//     pub current_dir:    String,
+//     pub files:          Vec<Box<dyn ImageDyn>>,
+// }
 
 
 static EXTENSIONS: &'static [&'static str] = &[
@@ -163,47 +188,140 @@ static EXTENSIONS: &'static [&'static str] = &[
 
 type FsiVec = VecDeque<FileSystemImage>;
 
+fn drain(items:& mut FsiVec) -> ScanProgress {
+    let mut files = Vec::<Box<dyn ImageDyn>>::new();
+
+    'r: loop {
+        match items.pop_front() {
+            Some(i) => { files.push(Box::new(i)); }
+            None    => { break 'r; }
+        }
+    }
+
+    ScanProgress::SomeFiles(files)
+}
+
+
 impl FileSystemHelper {
 
-    pub fn find_files_sipper(items: Vec<String>,max_depth:usize) -> impl Straw<(), SomeFiles, ImageError> {
+    pub fn find_files_sipper(args: Vec<String>,max_depth:usize) -> impl Straw<(), ScanProgress, ImageError> {
         sipper(async move |mut progress| {
 
-            for dir in items {
+            use globset::{GlobMatcher,GlobBuilder};
+            // let mut builder = GlobSetBuilder::new();
+
+            let mut items:FsiVec = VecDeque::new();
+
+            type DirGlob = Vec<(PathBuf,Option<GlobMatcher>)>;
+
+            let mut dirs:DirGlob = Vec::new();
+
+            for dir in &args {
                 let path = PathBuf::from(&dir);
-                let mut sent:usize = 0;
 
-                let mut drain = async |items:& mut FsiVec| {
-                    let mut msg = SomeFiles {
-                        current_dir:    String::from(""),
-                        files:          Vec::<Box<dyn ImageDyn>>::new()
-                    };
+                if dir.contains(['*','?','[']) {
+                    // ee_conio::cprintln!("glob ~[c70]{}",dir);
 
-                    'r: loop {
-                        match items.pop_front() {
-                            Some(i) => { msg.files.push(Box::new(i)); }
-                            None    => { break 'r; }
+                    let mut pbj = PathBuf::new();
+                    let mut pbh = PathBuf::new();
+
+                    let mut got_root = false;
+
+                    for c in path.components() {
+                        // ee_conio::cprintln!("{c:?}");
+
+                        let x1 = match c {
+                            Component::Normal(c) => c.to_str().unwrap(),
+                            _ => "",
+                        };
+
+                        pbh.push(c);
+
+                        if !got_root && !x1.contains(['*','?','[']) {
+                            pbj.push(c);
+                        }
+                        else {
+                            got_root = true;
                         }
                     }
 
-                    match msg.files.last() {
-                        Some(s) => { msg.current_dir = s.group().to_string() },
-                        None    => ()
-                    };
+                    let glob = match GlobBuilder::new(pbh.to_str().unwrap()).literal_separator(false).build() { Ok(g) => g, Err(_) => continue }.compile_matcher();
 
-                    progress.send(msg).await;
-                };
+                    dirs.push( (pbj,Some(glob) ) );
+                }
 
-                let mut items:FsiVec = VecDeque::new();
+                if path.is_dir() {
+                    dirs.push( (dir.into(),None) );
+                }
+
+
+                else if path.is_file() {
+                    match FileSystemImage::from_cl(path.to_path_buf() ) {
+                        Ok(mut i) => {
+                            let y = path.as_path();
+
+                            let (size,ftime) = match y.metadata() {
+                                Ok(s) => (s.len(),s.created().unwrap()),
+                                Err(_) => (0,std::time::SystemTime::now())
+                            };
+
+                            i.size = size;
+                            i.ftime = ftime.into();
+
+                            // ee_conio::cprintln!("i:?");
+
+                            items.push_back( i )
+                        },
+                        Err(e) => { ee_conio::cprintln!("{e:?}"); continue; }
+                    }
+                }
+            }
+
+            progress.send( drain(& mut items) ).await;
+
+
+
+            for dp in dirs {
+                progress.send( ScanProgress::CurrentDir(dp.0.display().to_string()) ).await;
+
+                let path = PathBuf::from(dp.0);
+
+                let mut sent:usize = 0;
+
+                use walkdir::{ DirEntry };
+
+                fn filter(gm:&Option<GlobMatcher>) -> impl FnMut(&DirEntry) -> bool {
+                    |e| {
+                        if e.depth() > 0 {
+                            match gm {
+                                Some(gm) => {
+                                    let item = e.path().display().to_string();
+                                    gm.is_match(item)
+                                },
+                                None     => true
+                            }
+                        }
+                        else {
+                            true
+                        }
+                    }
+                }
 
                 for entry in WalkDir::new(&path)
-                    .max_depth(max_depth)
-                    .into_iter()
-                    .filter_map( |e| { e.ok() } )
+                                .max_depth(max_depth)
+                                .into_iter()
+                                .filter_entry( filter(&dp.1) )
+                                .filter_map( |e| e.ok()  )
                 {
-                    let (size,ftime) = match entry.metadata() {
-                        Ok(s) => (s.len(),s.created().unwrap()),
-                        Err(_) => (0,std::time::SystemTime::now())
-                    };
+                    if entry.file_type().is_dir() && entry.depth()>0 {
+                        let stat = match entry.path().strip_prefix(&path) {
+                            Ok(p) => p.display().to_string(),
+                            Err(_) => entry.path().display().to_string()
+                        };
+
+                        progress.send( ScanProgress::CurrentDir(stat) ).await;
+                        continue;
+                    }
 
                     let ext = match entry.path().extension() {
                         Some(ext) => match ext.to_str() { None => { continue; }, Some(ext) => ext, }
@@ -211,11 +329,17 @@ impl FileSystemHelper {
                     };
 
                     if !EXTENSIONS.contains( &ext ) {
+                        tokio::task::yield_now().await;
                         continue;
                     }
 
                     if entry.file_type().is_file() {
-                        match FileSystemImage::new(&path, entry.path().to_path_buf() ) {
+                        let (size,ftime) = match entry.metadata() {
+                            Ok(s) => (s.len(),s.created().unwrap()),
+                            Err(_) => (0,std::time::SystemTime::now())
+                        };
+
+                        match FileSystemImage::from_origin(&path, entry.path().to_path_buf() ) {
                             Ok(mut i) => {
 
                                 i.size = size;
@@ -229,11 +353,11 @@ impl FileSystemHelper {
 
                     if items.len()> if sent < 10000 { 99 } else { 999 } {
                         sent += items.len();
-                        drain(& mut items).await;
+                        progress.send( drain(& mut items) ).await;
                     }
                 }
 
-                drain(& mut items).await;
+                progress.send( drain(& mut items) ).await;
             }
 
             Ok(())
