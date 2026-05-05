@@ -4,7 +4,7 @@ use ee_conio::{cprintln};
 
 const MIN_DELAY: u64 = 5;
 
-use crate::toast::{self,Toast,Manager};
+use crate::toast::{self,Toast};
 use crate::args;
 
 use crate::list_files::ScanProgress;
@@ -78,7 +78,7 @@ use iced::advanced::image::Error      as AllocError;
 
 
 #[derive(Debug, Clone)]
-pub enum Message {
+pub enum QVMsg {
     Left,
     Right,
     Slide(Instant),
@@ -278,16 +278,16 @@ impl QuickViewer {
         }
     }
 
-    pub fn new() -> (Self, Task<Message>) {
-        let mut m: Vec<Task<Message>> = vec![
-            Task::done(Message::FindFilesOnPath)
+    pub fn new() -> (Self, Task<QVMsg>) {
+        let mut m: Vec<Task<QVMsg>> = vec![
+            Task::done(QVMsg::FindFilesOnPath)
         ];
 
         let mut me = QuickViewer::default();
 
         if me.fullscreen {
             me.fullscreen = false;
-            m.push( Task::done(Message::FullScreenToggle));
+            m.push( Task::done(QVMsg::FullScreenToggle));
         }
 
 
@@ -315,7 +315,7 @@ impl QuickViewer {
         }
     }
 
-    fn goto_image_task(&mut self, index:ImageKey) -> Task<Message> {
+    fn goto_image_task(&mut self, index:ImageKey) -> Task<QVMsg> {
         if self.img_list.is_empty() { return Task::none(); }
 
         let key = match self.img_list.key_at(index) {
@@ -336,11 +336,11 @@ impl QuickViewer {
         self.preload_task(false)
     }
 
-    fn preload_task(&mut self,only_one:bool) -> Task<Message> {
+    fn preload_task(&mut self,only_one:bool) -> Task<QVMsg> {
 
         if self.img_list.is_empty() { return Task::none(); }
 
-        let mut m: Vec<Task<Message>> = vec![ ];
+        let mut m: Vec<Task<QVMsg>> = vec![ ];
 
         // If it isn't already in the cache, request that it be loaded in
         // anticipation that we will want it soon.
@@ -349,7 +349,7 @@ impl QuickViewer {
                 match self.pending_image_requests.get(&key) {
                     None => {
                         match self.pending_image_requests.insert(key,CacheData::new(key)) {
-                            None => { m.push(Task::done(Message::RequestAnImage(key))); }
+                            None => { m.push(Task::done(QVMsg::RequestAnImage(key))); }
                             Some(_) => { panic!(); }
                         }
                     },
@@ -382,7 +382,7 @@ impl QuickViewer {
         Task::batch(m)
     }
 
-    fn handle_error_task(&mut self,key:ImageKey,t:&str,i:&[u8]) -> Task<Message> {
+    fn handle_error_task(&mut self,key:ImageKey,t:&str,i:&[u8]) -> Task<QVMsg> {
 
         let path = match self.img_list.item_from_key(key) {
             Ok(ic) => { ic.fqp().display().to_string() },
@@ -418,26 +418,26 @@ impl QuickViewer {
     }
 
 
-    pub fn update(&mut self, event: Message, now: Instant) -> Task<Message> {
+    pub fn update(&mut self, event: QVMsg, now: Instant) -> Task<QVMsg> {
         self.now = now;
         // cprintln!("~[c7]{:?}    {:40.40}",now-self.start,format!("{:?}",event) );
         match event {
-            Message::Noop     =>    { Task::none() },
-            Message::Goodbye  =>    { iced::exit() },
+            QVMsg::Noop     =>    { Task::none() },
+            QVMsg::Goodbye  =>    { iced::exit() },
 
-            Message::Clip(s)            => { clipboard::write(s) },
-            Message::ClipResult(_)  => { Task::none() },
-            // Message::ClipResult(Ok(_))  => { Task::none() },
-            // Message::ClipResult(Err(e)) => { cprintln!("{e:?}"); Task::none() },
+            QVMsg::Clip(s)            => { clipboard::write(s) },
+            QVMsg::ClipResult(_)  => { Task::none() },
+            // QVMsg::ClipResult(Ok(_))  => { Task::none() },
+            // QVMsg::ClipResult(Err(e)) => { cprintln!("{e:?}"); Task::none() },
 
 
-            Message::ByeToaster(idx) => {
+            QVMsg::ByeToaster(idx) => {
                 self.toasts.remove(idx);
                 Task::none()
             },
 
 
-            Message::FontDown => {
+            QVMsg::FontDown => {
                 if self.args.font_size > 6
                 {
                     self.args.font_size -= 1;
@@ -448,7 +448,7 @@ impl QuickViewer {
                 }
                 Task::none()
             },
-            Message::FontUp => {
+            QVMsg::FontUp => {
                 if self.args.font_size == 0 {
                     self.args.font_size = 6;
                 }
@@ -459,17 +459,17 @@ impl QuickViewer {
                 Task::none()
             },
 
-            Message::LookAheadDisplayToggle => {
+            QVMsg::LookAheadDisplayToggle => {
                 self.args.view_cache_look_ahead = !self.args.view_cache_look_ahead;
                 Task::none()
             },
 
-            Message::ExifDisplayToggle => {
+            QVMsg::ExifDisplayToggle => {
                 self.args.view_exif = !self.args.view_exif;
                 Task::none()
             }
 
-            Message::IncDelay =>      {
+            QVMsg::IncDelay =>      {
                 self.args.delay += 5;
 
                 self.args.delay = if self.args.delay%5 == 0 { self.args.delay } else {
@@ -486,7 +486,7 @@ impl QuickViewer {
                 Task::none()
             },
 
-            Message::DecDelay =>    {
+            QVMsg::DecDelay =>    {
                 if self.args.delay > MIN_DELAY+5 {
                     self.args.delay -= 5;
                 }
@@ -509,7 +509,7 @@ impl QuickViewer {
             },
 
 
-            Message::RequestAnImage(key) => {
+            QVMsg::RequestAnImage(key) => {
                 // cprintln!("RAI ~[c61]{:x}",key);
 
                 let Some(r) = self.pending_image_requests.get_mut(&key) else {
@@ -518,7 +518,7 @@ impl QuickViewer {
 
                 match self.img_list.item_from_key(key) {
                     Ok(ic) => {
-                        let (m,h) = Task::perform(FileSystemHelper::load_image(ic.fqp(), key), Message::ImageLoaded).abortable();
+                        let (m,h) = Task::perform(FileSystemHelper::load_image(ic.fqp(), key), QVMsg::ImageLoaded).abortable();
 
                         r.request = Some(h.abort_on_drop());
 
@@ -532,29 +532,29 @@ impl QuickViewer {
                 }
             }
 
-            Message::ImageLoaded(Err(ImageError::ErrorOpeningImageFile(key))) => {
+            QVMsg::ImageLoaded(Err(ImageError::ErrorOpeningImageFile(key))) => {
                 self.handle_error_task(key,"ErrorOpeningImageFile",include_bytes!("../assets/open_error.png"))
             },
 
-            Message::ImageLoaded(Err(ImageError::ErrorReadingImageFile(key))) => {
+            QVMsg::ImageLoaded(Err(ImageError::ErrorReadingImageFile(key))) => {
                 self.handle_error_task(key,"ErrorReadingImageFile",include_bytes!("../assets/read_error.png"))
             },
 
-            Message::ImageLoaded(Err(ImageError::ErrorGuessingFormat(key))) => {
+            QVMsg::ImageLoaded(Err(ImageError::ErrorGuessingFormat(key))) => {
                 self.handle_error_task(key,"ErrorGuessingFormat",include_bytes!("../assets/format_error.png"))
             },
 
-            Message::ImageLoaded(Err(ImageError::ErrorDecodingImage(key))) => {
+            QVMsg::ImageLoaded(Err(ImageError::ErrorDecodingImage(key))) => {
                 self.handle_error_task(key,"ErrorDecodingImage",include_bytes!("../assets/decode_error.png"))
             },
 
 
-            Message::ImageLoaded(Err(e)) => {
-                cprintln!("Message::ImageLoaded {:?}",e);
+            QVMsg::ImageLoaded(Err(e)) => {
+                cprintln!("QVMsg::ImageLoaded {:?}",e);
                 Task::none()
             },
 
-            Message::ImageLoaded( Ok(mut ls) ) => {
+            QVMsg::ImageLoaded( Ok(mut ls) ) => {
                 let key     = ls.id;
 
                 let handle  = match ls.handle { Some(ref h) => h.clone(), None => { return Task::none(); } } ;
@@ -564,10 +564,10 @@ impl QuickViewer {
 
                 self.loaded_image_info.insert(ls.id,ls);
 
-                iced_image::allocate(handle).map(move |alloc| { Message::ImageCached(key,alloc) } )
+                iced_image::allocate(handle).map(move |alloc| { QVMsg::ImageCached(key,alloc) } )
             },
 
-            Message::ImageCached(k,Ok(a) ) => {
+            QVMsg::ImageCached(k,Ok(a) ) => {
                 // cprintln!("~[c255]{:?},~[c51]{k:x}  {:?}",self.now-self.start,a.handle());
                 let Some(_) = self.pending_image_requests.remove(&k) else {
                     // cprintln!("{k} missed   ");
@@ -593,13 +593,13 @@ impl QuickViewer {
                 Task::none()
             }
 
-            Message::ImageCached( _k,Err(_e) ) => {
-                // cprintln!("~[c255]{:?},Message::ImageCached {k:x} -- {e:?}",self.now-self.start);
+            QVMsg::ImageCached( _k,Err(_e) ) => {
+                // cprintln!("~[c255]{:?},QVMsg::ImageCached {k:x} -- {e:?}",self.now-self.start);
                 Task::none()
             }
 
 
-            Message::FindFilesProgress(p) => {
+            QVMsg::FindFilesProgress(p) => {
 
                 let list = match p {
                     ScanProgress::CurrentDir(d) => { self.current_scan_dir=d; return Task::none(); }
@@ -609,8 +609,8 @@ impl QuickViewer {
                     //     self.current_scan_dir=d.clone();
                     //     let (m,h) = Task::sip(
                     //         FileSystemHelper::find_files_sipper(vec![d],1),
-                    //         Message::FindFilesProgress,
-                    //         | _e | { Message::FileFindComplete }
+                    //         QVMsg::FindFilesProgress,
+                    //         | _e | { QVMsg::FileFindComplete }
                     //     ).abortable();
                     //     return m;
                     // }
@@ -634,12 +634,12 @@ impl QuickViewer {
                     Task::none()
                 }
             },
-            Message::FileFindComplete => {
+            QVMsg::FileFindComplete => {
                 self.scan_dir_task = None;
                 return self.preload_task(false);
             },
 
-            Message::CancelFileFind => {
+            QVMsg::CancelFileFind => {
                 match &self.scan_dir_task {
                     None => { },
                     Some(h) => {
@@ -651,11 +651,11 @@ impl QuickViewer {
             },
 
 
-            Message::FindFilesOnPath => {
+            QVMsg::FindFilesOnPath => {
                 let (m,h) = Task::sip(
                     FileSystemHelper::find_files_sipper(self.args.dirs.clone(),self.args.max_depth),
-                    Message::FindFilesProgress,
-                    | _e | { Message::FileFindComplete }
+                    QVMsg::FindFilesProgress,
+                    | _e | { QVMsg::FileFindComplete }
                 ).abortable();
 
                 self.scan_dir_task = Some(h);
@@ -663,10 +663,10 @@ impl QuickViewer {
                 m
             },
 
-            Message::FullScreenToggle => {
+            QVMsg::FullScreenToggle => {
                 use iced::window;
 
-                // let mut m: Vec<Task<Message>> = vec![];
+                // let mut m: Vec<Task<QVMsg>> = vec![];
 
                 let mode = if self.fullscreen  {
                     self.fullscreen = false; window::Mode::Windowed
@@ -679,27 +679,27 @@ impl QuickViewer {
             }
 
 
-            Message::Quit => {
+            QVMsg::Quit => {
                 use iced::window;
 
-                let m: Vec<Task<Message>> = vec![
+                let m: Vec<Task<QVMsg>> = vec![
                     window::latest().and_then(move |id| iced::window::minimize(id, true)),
-                    Task::done(Message::Goodbye),
+                    Task::done(QVMsg::Goodbye),
                 ];
 
                 Task::batch(m)
             },
 
-            Message::Sort => {
+            QVMsg::Sort => {
                 let _ = self.img_list.sort();
                 self.preload_task(false)
             }
-            Message::SortSize => {
+            QVMsg::SortSize => {
                 let _ = self.img_list.sort_size();
                 self.preload_task(false)
             }
 
-            Message::SortDate => {
+            QVMsg::SortDate => {
                 let _ = self.img_list.sort_date();
 
                 /* Sort by exif date
@@ -718,7 +718,7 @@ impl QuickViewer {
             }
 
 
-            Message::Shuffle => {
+            QVMsg::Shuffle => {
                 let _ = self.img_list.shuffle();
 
                 self.pending_image_requests.drain();
@@ -726,7 +726,7 @@ impl QuickViewer {
             }
 
 
-            Message::RandomImage => {
+            QVMsg::RandomImage => {
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 } else {
@@ -739,7 +739,7 @@ impl QuickViewer {
                 }
             }
 
-            Message::PageUp => {
+            QVMsg::PageUp => {
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 }
@@ -752,7 +752,7 @@ impl QuickViewer {
                 }
             }
 
-            Message::PageDown => {
+            QVMsg::PageDown => {
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 }
@@ -765,7 +765,7 @@ impl QuickViewer {
                 }
             }
 
-            Message::Home => {
+            QVMsg::Home => {
                 let next_image = match self.img_list.first() {
                     Ok(i) => i,
                     Err(_) => { panic!(); }
@@ -775,7 +775,7 @@ impl QuickViewer {
                 self.goto_image_task(next_image)
             },
 
-            Message::End => {
+            QVMsg::End => {
                 let next_image = match self.img_list.last() {
                     Ok(i) => i,
                     Err(_) => { panic!(); }
@@ -785,13 +785,13 @@ impl QuickViewer {
                 self.goto_image_task( next_image )
             },
 
-            Message::Swap => {
+            QVMsg::Swap => {
                 self.zoom=!self.zoom;
                 Task::none()
             }
 
-            Message::Scrolled(ScrollDelta::Pixels{x: _, y: _}) => { Task::none() }
-            Message::Scrolled(ScrollDelta::Lines{x:_,y}) => {
+            QVMsg::Scrolled(ScrollDelta::Pixels{x: _, y: _}) => { Task::none() }
+            QVMsg::Scrolled(ScrollDelta::Lines{x:_,y}) => {
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 }
@@ -804,13 +804,13 @@ impl QuickViewer {
                 }
             }
 
-            Message::FileDropped(f) => {
+            QVMsg::FileDropped(f) => {
                 cprintln!("{:?}~[c51]{} ",self.now,f.display());
 
                 let (m,h) = Task::sip(
                     FileSystemHelper::find_files_sipper(vec![f.display().to_string()],self.args.max_depth),
-                    Message::FindFilesProgress,
-                    | _e | { Message::FileFindComplete }
+                    QVMsg::FindFilesProgress,
+                    | _e | { QVMsg::FileFindComplete }
                 ).abortable();
 
                 self.scan_dir_task = Some(h);
@@ -818,7 +818,7 @@ impl QuickViewer {
                 m
             }
 
-            Message::Left => {
+            QVMsg::Left => {
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 } else {
@@ -830,7 +830,7 @@ impl QuickViewer {
                 }
             }
 
-            Message::Slide(_tick) => {
+            QVMsg::Slide(_tick) => {
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 } else {
@@ -841,7 +841,7 @@ impl QuickViewer {
                 }
             }
 
-            Message::Right => {
+            QVMsg::Right => {
 
                 if self.show_when_loaded.is_some() {
                     Task::none()
@@ -865,7 +865,7 @@ impl QuickViewer {
                 }
             }
 
-            Message::Space => {
+            QVMsg::Space => {
                 self.args.slideshow = !self.args.slideshow;
                 Task::none()
             },
@@ -914,7 +914,7 @@ impl QuickViewer {
     }
 
 
-    pub fn view(&self) -> Element<'_, Message> {
+    pub fn view(&self) -> Element<'_, QVMsg> {
         let c = match self.img_list.the_index() {
             Ok(i) => i.get(),
             Err(_) => 0
@@ -955,9 +955,9 @@ impl QuickViewer {
                 container(
                     row![
                         button( text("fqp").size(max(self.args.font_size,10)).color(color!(0x000000)) )
-                            .padding([0,5]).height(iced::Length::Fill).on_press(Message::Clip(fqp)),
+                            .padding([0,5]).height(iced::Length::Fill).on_press(QVMsg::Clip(fqp)),
                         button( text("fn").size(max(self.args.font_size,10)).color(color!(0x000000)) )
-                            .padding([0,5]).height(iced::Length::Fill).on_press(Message::Clip(fname.into()))
+                            .padding([0,5]).height(iced::Length::Fill).on_press(QVMsg::Clip(fname.into()))
                     ].spacing(5)
                 );
 
@@ -1015,7 +1015,7 @@ impl QuickViewer {
             container(
                 container(
                     row![
-                        button( text("stop").size(max(self.args.font_size,12)-2 )).padding([0,2]).height(iced::Length::Shrink).on_press(Message::CancelFileFind),
+                        button( text("stop").size(max(self.args.font_size,12)-2 )).padding([0,2]).height(iced::Length::Shrink).on_press(QVMsg::CancelFileFind),
                         container(
                             text(self.current_scan_dir.clone())
                                 .size(max(self.args.font_size,12)-2)
@@ -1103,7 +1103,7 @@ impl QuickViewer {
         };
 
         // EXIF info table
-        type Tbl<'a> = Container<'a, Message, Theme, Renderer>;
+        type Tbl<'a> = Container<'a, QVMsg, Theme, Renderer>;
         let exif_info:Tbl =
         if self.args.view_exif {
             match self.has_exif() {
@@ -1148,7 +1148,7 @@ impl QuickViewer {
                                     d
                                 };
 
-                                mouse_area(text!("{}",d.1).color(d.0).size(max(self.args.font_size,10))).on_press(Message::Clip(f.display_value().with_unit(f).to_string()))
+                                mouse_area(text!("{}",d.1).color(d.0).size(max(self.args.font_size,10))).on_press(QVMsg::Clip(f.display_value().with_unit(f).to_string()))
                             })
                         ],
                         &mut exf.fields()
@@ -1251,7 +1251,7 @@ impl QuickViewer {
         ;
 
         let stuff = if true {
-            container( toast::Manager::new(content, &self.toasts, Message::ByeToaster)
+            container( toast::Manager::new(content, &self.toasts, QVMsg::ByeToaster)
                 .timeout(5) )
         }
         else {
@@ -1262,14 +1262,14 @@ impl QuickViewer {
         mouse_area(
             center(stuff).width(Fill).height(Fill)
         )
-        .on_press(Message::Left)
-        .on_right_press(Message::Right)
-        .on_middle_press(Message::Swap)
-        .on_scroll(|delta| { Message::Scrolled(delta) } )
+        .on_press(QVMsg::Left)
+        .on_right_press(QVMsg::Right)
+        .on_middle_press(QVMsg::Swap)
+        .on_scroll(|delta| { QVMsg::Scrolled(delta) } )
         .into()
     }
 
-    pub fn subscription(&self) -> Subscription<Message> {
+    pub fn subscription(&self) -> Subscription<QVMsg> {
         use keyboard::Event         as EV;
         use keyboard::Key           as KK;
         use keyboard::key::Named    as KN;
@@ -1280,17 +1280,17 @@ impl QuickViewer {
             match event {
                 EV::KeyPressed { key: KK::Named(key), ..} => match key {
 
-                    // KN::ArrowUp      => Some(Message::Up),
-                    KN::ArrowLeft    => Some(Message::Left),
-                    // KN::ArrowDown    => Some(Message::Down),
-                    KN::ArrowRight   => Some(Message::Right),
-                    KN::PageDown     => Some(Message::PageDown),
-                    KN::PageUp       => Some(Message::PageUp),
-                    KN::Space        => Some(Message::Space),
-                    KN::Home         => Some(Message::Home),
-                    KN::End          => Some(Message::End),
-                    KN::Escape       => Some(Message::Quit),
-                    KN::F11          => Some(Message::FullScreenToggle),
+                    // KN::ArrowUp      => Some(QVMsg::Up),
+                    KN::ArrowLeft    => Some(QVMsg::Left),
+                    // KN::ArrowDown    => Some(QVMsg::Down),
+                    KN::ArrowRight   => Some(QVMsg::Right),
+                    KN::PageDown     => Some(QVMsg::PageDown),
+                    KN::PageUp       => Some(QVMsg::PageUp),
+                    KN::Space        => Some(QVMsg::Space),
+                    KN::Home         => Some(QVMsg::Home),
+                    KN::End          => Some(QVMsg::End),
+                    KN::Escape       => Some(QVMsg::Quit),
+                    KN::F11          => Some(QVMsg::FullScreenToggle),
                     // KN::Alt          => { cprintln!("{:?}",event); None },
                     // a  => { cprintln!("~[c197]{a:?}"); None }
                     _ => None,
@@ -1303,15 +1303,15 @@ impl QuickViewer {
                     "A" => { cprintln!("A"); None },
                     "!" => { cprintln!("!"); None },
                     "1" => { cprintln!("{v} "); None },
-                    "f" => Some(Message::FullScreenToggle),
-                    "q" => Some(Message::Quit),
-                    "s" => Some(Message::Sort),
-                    "S" => Some(Message::SortSize),
-                    "d" => Some(Message::SortDate),
-                    "h" => Some(Message::Shuffle),
-                    "r" => Some(Message::RandomImage),
-                    "[" => Some(Message::DecDelay),
-                    "]" => Some(Message::IncDelay),
+                    "f" => Some(QVMsg::FullScreenToggle),
+                    "q" => Some(QVMsg::Quit),
+                    "s" => Some(QVMsg::Sort),
+                    "S" => Some(QVMsg::SortSize),
+                    "d" => Some(QVMsg::SortDate),
+                    "h" => Some(QVMsg::Shuffle),
+                    "r" => Some(QVMsg::RandomImage),
+                    "[" => Some(QVMsg::DecDelay),
+                    "]" => Some(QVMsg::IncDelay),
                      // a  => { cprintln!("~[c197]{a}"); None }
                      _  => None,
                 },
@@ -1319,16 +1319,16 @@ impl QuickViewer {
                 EV::KeyPressed { key: KK::Character(ref key), modifiers: keyboard::Modifiers::ALT, text:Some(_text),..} => match key.as_ref() {
                     "w" => {cprintln!("Alt W"); None },
                     "1" => {cprintln!("Alt 1"); None },
-                    "d" => { Some(Message::LookAheadDisplayToggle) }
-                    "e" => { Some(Message::ExifDisplayToggle) }
+                    "d" => { Some(QVMsg::LookAheadDisplayToggle) }
+                    "e" => { Some(QVMsg::ExifDisplayToggle) }
                      // a  => { cprintln!("~[c197]Alt {text}"); None }
                      _  => None,
                 },
                 EV::KeyPressed { key: KK::Character(ref key), modifiers: keyboard::Modifiers::CTRL, ..} => match key.as_ref() {
                     "w" => {cprintln!("Ctrl w"); None },
-                    "-" => { Some(Message::FontDown) },
-                    "+" => { Some(Message::FontUp) },
-                    "=" => { Some(Message::FontUp) },
+                    "-" => { Some(QVMsg::FontDown) },
+                    "+" => { Some(QVMsg::FontUp) },
+                    "=" => { Some(QVMsg::FontUp) },
                      // a  => { cprintln!("~[c197]Ctrl {key}"); None }
                      _  => None,
                 },
@@ -1353,16 +1353,16 @@ impl QuickViewer {
 
         use iced::time;
         if self.args.slideshow {
-            s.push( time::every(time::Duration::from_millis(self.args.delay)).map(Message::Slide) );
+            s.push( time::every(time::Duration::from_millis(self.args.delay)).map(QVMsg::Slide) );
         }
 
 
         s.push( iced::window::events().map(|x| {
             match x {
                 (_,iced::window::Event::FileDropped(x)) => {
-                    Message::FileDropped(x)
+                    QVMsg::FileDropped(x)
                 },
-                (_,_) => { Message::Noop }
+                (_,_) => { QVMsg::Noop }
             }
         } ) );
 
@@ -1370,7 +1370,7 @@ impl QuickViewer {
         if self.args.window_frames {
             s.push( iced::window::frames().map(|x| {
                 cprintln!("{:?}",x);
-                Message::Noop } ) );
+                QVMsg::Noop } ) );
         }
 
         Subscription::batch(s)

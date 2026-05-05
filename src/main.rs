@@ -11,84 +11,61 @@ mod toast;
 
 const MIN_DELAY: u64 = 5;
 
-use crate::viewer::{QuickViewer,Message};
+use crate::viewer::{QuickViewer,QVMsg};
 
-use iced::mouse::{ ScrollDelta };
+use crate::args::{Args};
+
 use iced::time::Instant;
-use iced::widget::image::Handle as ImageHandle;
-use iced::widget::text::Wrapping;
-
-use iced::task::Handle as TaskHandle;
-
-use std::hash::{Hash, Hasher};
 
 use iced::widget::{
-    Container,
-    // Row,
-    table,
-    Theme,
-    float,
-    stack,
-    center,
-    button,
-    hover,
-    // center_x, center_y, checkbox,
-    column,
     container,
-    scrollable,
-    container::Style     as CStyle,
-    progress_bar,
-    progress_bar::Style  as PBStyle,
-    mouse_area,
-    image as iced_image,
+    // mouse_area,
     row,
     text,
 };
 
 use iced::{
+    application,
     Element,
-    Length,
-    Fill,
-    Font,
     Subscription,
     Task,
-    Background,
-    Padding,
-    Renderer,
-    border,
-    color,
-    keyboard,
-    clipboard,
-    alignment::Vertical,
-    alignment::Horizontal,
+    // Background,
+    // Padding,
+    // Renderer,
+    // border,
+    // color,
+    // keyboard,
+    // clipboard,
+    // alignment::Vertical,
+    // alignment::Horizontal,
+    window,
+    window::{Settings,icon},
+    Result as IcedResult
 };
 
-use std::collections::{ HashMap };
-use std::path::PathBuf;
-use std::cmp::max;
-
-use lru::LruCache;
-use std::num::NonZeroUsize as ImageKey;
-
-use iced::advanced::image::Allocation as ImageAllocation;
-use iced::advanced::image::Error      as AllocError;
+use image::{self,ImageFormat};
 
 
 enum Msg {
     Hi,
-    Qv(Message),
+    Qv(QVMsg),
 }
 
 struct App {
-    hi:String,
-    qv:QuickViewer,
+    args:           Args,
+    hi:             String,
+    qv:             QuickViewer,
 }
 
 impl App {
     fn default() -> Self {
+        let args = args::do_args();
+
         Self {
-            hi: "Hi!".into(),
-            qv: QuickViewer::default(),
+            hi:     "Hi!".into(),
+            qv:     QuickViewer::default(),
+
+            args
         }
     }
 
@@ -119,45 +96,25 @@ impl App {
 }
 
 
-pub fn main() -> iced::Result {
+pub fn main() -> IcedResult {
     #[cfg(feature = "heif")]
     libheif_rs::integration::image::register_all_decoding_hooks();
 
-    let settings = iced::window::Settings {
+    let settings = Settings {
         transparent:true,
-        // decorations:false,
-        icon: Some(iced::window::icon::from_file_data(include_bytes!("../assets/icon.png"),Some(image::ImageFormat::Png)).expect("1")),
-        ..iced::window::Settings::default()
+        icon: Some(icon::from_file_data(include_bytes!("../assets/icon.png"),Some(ImageFormat::Png)).expect("1")),
+        ..Settings::default()
     };
 
-    iced::application::timed(
+    application::timed(
         App::new,
         App::update,
         App::subscription,
         App::view
     )
+    .window(settings)
     .title("Quick Viewer")
     .centered()
     .run()
-
-    // iced::application::timed(
-    //         QuickViewer::new,
-    //         QuickViewer::update,
-    //         QuickViewer::subscription,
-    //         QuickViewer::view
-    //     )
-    //     .theme(QuickViewer::theme)
-    //     .title("Quick Viewer")
-    //     .window(settings)
-    //     .centered()
-    //     .transparent(true)
-    //     // .style(|_state, _theme| {
-    //     //     iced::theme::Style {
-    //     //         background_color:
-    //     //         iced::Color { r:0.0,g:0.0,b:0.0,a:0.0 },
-    //     //         text_color: color!(0xefefef),
-    //     //     }
-    //     // })
-    //     .run()
 }
 
