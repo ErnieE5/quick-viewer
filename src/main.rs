@@ -60,6 +60,7 @@ use iced::{
     Subscription,
     Task,
     Background,
+    Padding,
     Renderer,
     border,
     color,
@@ -807,8 +808,17 @@ impl QuickViewer {
             }
 
             Message::FileDropped(f) => {
-                cprintln!("~[c58]{}",f.display());
-                Task::none()
+                cprintln!("{:?}~[c51]{} ",self.now,f.display());
+
+                let (m,h) = Task::sip(
+                    FileSystemHelper::find_files_sipper(vec![f.display().to_string()],self.args.max_depth),
+                    Message::FindFilesProgress,
+                    | _e | { Message::FileFindComplete }
+                ).abortable();
+
+                self.scan_dir_task = Some(h);
+
+                m
             }
 
             Message::Left => {
@@ -936,9 +946,9 @@ impl QuickViewer {
         let file_name_over =
                 container(
                     row![
-                        button( text("fqp").size(self.args.font_size-2).color(color!(0x000000)) )
+                        button( text("fqp").size(max(self.args.font_size,10)).color(color!(0x000000)) )
                             .padding([0,5]).height(iced::Length::Fill).on_press(Message::Clip(fqp)),
-                        button( text("fn").size(self.args.font_size-2).color(color!(0x000000)) )
+                        button( text("fn").size(max(self.args.font_size,10)).color(color!(0x000000)) )
                             .padding([0,5]).height(iced::Length::Fill).on_press(Message::Clip(fname.into()))
                     ].spacing(5)
                 );
@@ -1167,9 +1177,11 @@ impl QuickViewer {
                                 text!("  {:x} {}  ",item.1.key,ii)
                                     .font(Font::MONOSPACE)
                                     .into()
-                            })
+                            } )
                         )
+                        .padding( Padding::default().bottom( std::cmp::min(self.args.font_size,20) as f32 ) )
                     )
+
                     .style( |_| {
                         CStyle {
                             background: Some(iced::Background::Color(iced::Color::from_rgba8(0, 0, 0,0.25))),
@@ -1214,9 +1226,9 @@ impl QuickViewer {
                 column![
                     stack![
                         img,
-                        float( cache_load_display ),
                         float( exif_info ),
                         float( scan_dir_progress ),
+                        float( cache_load_display ),
                     ],
                     container(counter).width(Fill),
                 ],
@@ -1337,16 +1349,16 @@ impl QuickViewer {
             s.push( time::every(time::Duration::from_millis(self.args.delay)).map(|_| Message::Right) );
         }
 
-        if self.args.window_events {
-            s.push( iced::window::events().map(|x| {
-                match x {
-                    (_,iced::window::Event::FileDropped(x)) => {
-                        Message::FileDropped(x)
-                    },
-                    (_,_) => { Message::Noop }
-                }
-            } ) );
-        }
+
+        s.push( iced::window::events().map(|x| {
+            match x {
+                (_,iced::window::Event::FileDropped(x)) => {
+                    Message::FileDropped(x)
+                },
+                (_,_) => { Message::Noop }
+            }
+        } ) );
+
 
         if self.args.window_frames {
             s.push( iced::window::frames().map(|x| {
