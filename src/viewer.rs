@@ -5,7 +5,7 @@ use ee_conio::{cprintln};
 const MIN_DELAY: u64 = 5;
 
 use crate::toast::{self,Toast};
-use crate::args;
+// use crate::args;
 
 use crate::list_files::ScanProgress;
 
@@ -60,7 +60,6 @@ use iced::{
     Renderer,
     border,
     color,
-    keyboard,
     clipboard,
     alignment::Vertical,
     alignment::Horizontal,
@@ -76,9 +75,27 @@ use std::num::NonZeroUsize as ImageKey;
 use iced::advanced::image::Allocation as ImageAllocation;
 use iced::advanced::image::Error      as AllocError;
 
+#[derive(Debug, Clone)]
+pub enum SlideMode {
+    Forward,
+    Reverse,
+    Random,
+}
+
+impl SlideMode {
+    pub fn next(&mut self) -> Self {
+        match self {
+            SlideMode::Forward => SlideMode::Reverse,
+            SlideMode::Reverse => SlideMode::Random,
+            SlideMode::Random => SlideMode::Forward,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum QVMsg {
+    Welcome,
+
     Left,
     Right,
     Slide(Instant),
@@ -91,9 +108,9 @@ pub enum QVMsg {
 
     LookAheadDisplayToggle,
     ExifDisplayToggle,
+    SlideModeToggle,
 
     Space,
-    Quit,
     Sort,
     SortSize,
     SortDate,
@@ -106,12 +123,10 @@ pub enum QVMsg {
     PageUp,
     Home,
     End,
-    FullScreenToggle,
-    Noop,
+    // Noop,
     Clip(String),
     #[allow(unused)]
     ClipResult(Result<(), std::fmt::Error>),
-    Goodbye,
     ByeToaster(usize),
 
     RequestAnImage(ImageKey),
@@ -162,13 +177,45 @@ impl Hash for CacheData {
     }
 }
 
+#[derive(Debug)]
+pub struct QVConfig
+{
+    pub look_ahead:         isize,
+    pub look_behind:        isize,
+    pub cache_size:         usize,
+    pub no_empty_cat:       bool,
+    pub slideshow:          bool,
+    pub font_size:          u32,
+    pub view_exif:          bool,
+    pub delay:              u64,
+    pub dirs:               Vec<String>,
+    pub max_depth:          usize,
+    pub time_forward_loop:  bool,
+}
 
 
+impl QVConfig {
+    pub fn default() -> Self {
+        Self {
+            look_ahead:         5,
+            look_behind:        5,
+            cache_size:         10,
+            no_empty_cat:       false,
+            slideshow:          false,
+            font_size:          12,
+            view_exif:          false,
+            delay:              1000,
+            dirs:               Vec::new(),
+            max_depth:          10000,
+            time_forward_loop:  false,
+        }
+    }
+}
 
 
 #[derive(Debug)]
 pub struct QuickViewer {
-    args:                   args::Args,
+    config:                 QVConfig,
     #[allow(unused)]
     start:                  Instant,
     loop_start:             Instant,
@@ -180,7 +227,7 @@ pub struct QuickViewer {
 
     toasts: Vec<Toast>,
 
-
+    view_cache_look_ahead:      bool,
     show_when_loaded:           Option<ImageKey>,
     current_image_handle:       Option<ImageHandle>,
     cache_image_alloc:          LruCache<ImageKey, ImageAllocation>,
@@ -190,9 +237,9 @@ pub struct QuickViewer {
     current_scan_dir:           String,
 
     zoom:                       bool,
-    fullscreen:                 bool,
+    slide_mode:                 SlideMode,
 
-    empty_image: ImageHandle,
+    empty_image:                ImageHandle,
 
 }
 
@@ -233,15 +280,12 @@ macro_rules! whd_from_asset {
 
 
 impl QuickViewer {
-    pub fn default() -> Self {
-        let args = args::do_args();
-
+    pub fn new(config: QVConfig) -> Self {
         Self {
-            cache_image_alloc:  LruCache::new(ImageKey::new(args.cache_size).unwrap()),
-            fullscreen:         args.fullscreen,
+            cache_image_alloc:  LruCache::new(ImageKey::new(config.cache_size).unwrap()),
 
             empty_image: {
-                let (w,h,d) = if !args.no_splash {
+                let (w,h,d) = if !config.no_empty_cat {
                     whd_from_asset!("../assets/jasper.png")
                 }
                 else {
@@ -264,37 +308,19 @@ impl QuickViewer {
             loop_start:     Instant::now(),
             now:            Instant::now(),
             img_list:       ImageList::new(),
-
+            
 
             current_image_handle:   None,
-
+            view_cache_look_ahead:  false,
             show_when_loaded:       None,
             pending_image_requests: HashMap::new(),
             scan_dir_task:          None,
             zoom:                   false,
+            slide_mode:             SlideMode::Forward,
             current_scan_dir:       "".into(),
 
-            args,
+            config
         }
-    }
-
-    pub fn new() -> (Self, Task<QVMsg>) {
-        let mut m: Vec<Task<QVMsg>> = vec![
-            Task::done(QVMsg::FindFilesOnPath)
-        ];
-
-        let mut me = QuickViewer::default();
-
-        if me.fullscreen {
-            me.fullscreen = false;
-            m.push( Task::done(QVMsg::FullScreenToggle));
-        }
-
-
-        (
-            me,
-            Task::batch(m)
-        )
     }
 
     fn showit(&mut self) -> bool {
@@ -371,7 +397,7 @@ impl QuickViewer {
             // MOST of the time the only item that NEEDS preload will be either
             // -10 back or 10 forward depending on the direction moved when cycling
             // images 1 by one.  All other just get ignored in the batching routine.
-            for i in il.peek_range(-1*self.args.look_behind..=self.args.look_ahead) {
+            for i in il.peek_range(-1*self.config.look_behind..=self.config.look_ahead) {
                 match il.key_at(i) {
                     Ok(k) => add_to_batch(k),
                     Err(_) => todo!(),
@@ -406,8 +432,8 @@ impl QuickViewer {
 
             self.show_when_loaded = None;
 
-            if self.args.slideshow {
-                self.args.slideshow = false;
+            if self.config.slideshow {
+                self.config.slideshow = false;
             }
 
             return Task::none();
@@ -422,8 +448,8 @@ impl QuickViewer {
         self.now = now;
         // cprintln!("~[c7]{:?}    {:40.40}",now-self.start,format!("{:?}",event) );
         match event {
-            QVMsg::Noop     =>    { Task::none() },
-            QVMsg::Goodbye  =>    { iced::exit() },
+            QVMsg::Welcome  =>    { Task::done( QVMsg::FindFilesOnPath ) }
+            // QVMsg::Noop     =>    { Task::none() },
 
             QVMsg::Clip(s)            => { clipboard::write(s) },
             QVMsg::ClipResult(_)  => { Task::none() },
@@ -438,71 +464,76 @@ impl QuickViewer {
 
 
             QVMsg::FontDown => {
-                if self.args.font_size > 6
+                if self.config.font_size > 6
                 {
-                    self.args.font_size -= 1;
+                    self.config.font_size -= 1;
                 }
                 else
                 {
-                    self.args.font_size = 0;
+                    self.config.font_size = 0;
                 }
                 Task::none()
             },
             QVMsg::FontUp => {
-                if self.args.font_size == 0 {
-                    self.args.font_size = 6;
+                if self.config.font_size == 0 {
+                    self.config.font_size = 6;
                 }
-                else if self.args.font_size < 50
+                else if self.config.font_size < 50
                 {
-                    self.args.font_size += 1;
+                    self.config.font_size += 1;
                 }
                 Task::none()
             },
 
             QVMsg::LookAheadDisplayToggle => {
-                self.args.view_cache_look_ahead = !self.args.view_cache_look_ahead;
+                self.view_cache_look_ahead = !self.view_cache_look_ahead;
                 Task::none()
             },
 
             QVMsg::ExifDisplayToggle => {
-                self.args.view_exif = !self.args.view_exif;
+                self.config.view_exif = !self.config.view_exif;
+                Task::none()
+            }
+
+            QVMsg::SlideModeToggle => {
+                self.slide_mode = self.slide_mode.next();
                 Task::none()
             }
 
             QVMsg::IncDelay =>      {
-                self.args.delay += 5;
+                self.config.delay += 5;
 
-                self.args.delay = if self.args.delay%5 == 0 { self.args.delay } else {
-                    (self.args.delay/5)*5
+                self.config.delay = if self.config.delay%5 == 0 { self.config.delay } else {
+                    (self.config.delay/5)*5
                 };
 
                 if self.toasts.len() > 0 {
-                    self.toasts[0].message = self.args.delay.to_string();
+                    self.toasts[0].message = self.config.delay.to_string();
                 }
                 else
                 {
-                    self.toasts.push( Toast { message: self.args.delay.to_string() } );
+                    self.toasts.push( Toast { message: self.config.delay.to_string() } );
                 }
                 Task::none()
             },
 
             QVMsg::DecDelay =>    {
-                if self.args.delay > MIN_DELAY+5 {
-                    self.args.delay -= 5;
+                if self.config.delay > MIN_DELAY+5 {
+                    self.config.delay -= 5;
                 }
                 else {
-                    self.args.delay = MIN_DELAY;
+                    self.config.delay = MIN_DELAY;
                 }
-                self.args.delay = if self.args.delay%5 == 0 { self.args.delay } else {
-                    ((self.args.delay+1)/5)*5
+                self.config.delay = if self.config.delay%5 == 0 { self.config.delay } else {
+                    ((self.config.delay+1)/5)*5
                 };
 
                 if self.toasts.len() > 0 {
-                    self.toasts[0].message = self.args.delay.to_string();
+                    self.toasts[0].message = self.config.delay.to_string();
                 }
                 else
                 {
-                    self.toasts.push( Toast { message: self.args.delay.to_string() } );
+                    self.toasts.push( Toast { message: self.config.delay.to_string() } );
                 }
 
                 Task::none()
@@ -653,7 +684,7 @@ impl QuickViewer {
 
             QVMsg::FindFilesOnPath => {
                 let (m,h) = Task::sip(
-                    FileSystemHelper::find_files_sipper(self.args.dirs.clone(),self.args.max_depth),
+                    FileSystemHelper::find_files_sipper(self.config.dirs.clone(),self.config.max_depth),
                     QVMsg::FindFilesProgress,
                     | _e | { QVMsg::FileFindComplete }
                 ).abortable();
@@ -663,32 +694,7 @@ impl QuickViewer {
                 m
             },
 
-            QVMsg::FullScreenToggle => {
-                use iced::window;
 
-                // let mut m: Vec<Task<QVMsg>> = vec![];
-
-                let mode = if self.fullscreen  {
-                    self.fullscreen = false; window::Mode::Windowed
-
-                } else {
-                    self.fullscreen = true;  window::Mode::Fullscreen
-                };
-
-                window::latest().and_then(move |id| window::set_mode(id, mode))
-            }
-
-
-            QVMsg::Quit => {
-                use iced::window;
-
-                let m: Vec<Task<QVMsg>> = vec![
-                    window::latest().and_then(move |id| iced::window::minimize(id, true)),
-                    Task::done(QVMsg::Goodbye),
-                ];
-
-                Task::batch(m)
-            },
 
             QVMsg::Sort => {
                 let _ = self.img_list.sort();
@@ -808,7 +814,7 @@ impl QuickViewer {
                 cprintln!("{:?}~[c51]{} ",self.now,f.display());
 
                 let (m,h) = Task::sip(
-                    FileSystemHelper::find_files_sipper(vec![f.display().to_string()],self.args.max_depth),
+                    FileSystemHelper::find_files_sipper(vec![f.display().to_string()],self.config.max_depth),
                     QVMsg::FindFilesProgress,
                     | _e | { QVMsg::FileFindComplete }
                 ).abortable();
@@ -834,9 +840,15 @@ impl QuickViewer {
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 } else {
-                    let Some(next_idx) = self.img_list.peek_range(-1..=-1).next() else {
-                        return Task::none();
+                    let next_idx = match self.slide_mode {
+                        SlideMode::Forward => { self.img_list.peek_range( 1..= 1).next().expect("") },
+                        SlideMode::Reverse => { self.img_list.peek_range(-1..=-1).next().expect("") },
+                        SlideMode::Random  => {
+                            self.pending_image_requests.drain();
+                            self.img_list.random().expect("")
+                        },
                     };
+                   
                     self.goto_image_task(next_idx)
                 }
             }
@@ -850,7 +862,7 @@ impl QuickViewer {
                         return Task::none();
                     };
 
-                    if self.args.time_forward_loop {
+                    if self.config.time_forward_loop {
                         if next_idx == ImageKey::new(1).expect("reality")
                         {
                             if !self.toasts.is_empty() {
@@ -866,7 +878,7 @@ impl QuickViewer {
             }
 
             QVMsg::Space => {
-                self.args.slideshow = !self.args.slideshow;
+                self.config.slideshow = !self.config.slideshow;
                 Task::none()
             },
         }
@@ -938,14 +950,14 @@ impl QuickViewer {
                 container(
                     row![
                         text(group)
-                            .size(self.args.font_size)
+                            .size(self.config.font_size)
                             .color(color!(0xaDaD96))
                             .wrapping(Wrapping::None),
                         text("/")
                             .color(color!(0xffffff))
-                            .size(self.args.font_size),
+                            .size(self.config.font_size),
                         text(fname)
-                            .size(self.args.font_size)
+                            .size(self.config.font_size)
                             .color(color!(0xFDFD96))
                             .wrapping(Wrapping::None)
                     ]
@@ -954,9 +966,9 @@ impl QuickViewer {
         let file_name_over =
                 container(
                     row![
-                        button( text("fqp").size(max(self.args.font_size,10)).color(color!(0x000000)) )
+                        button( text("fqp").size(max(self.config.font_size,10)).color(color!(0x000000)) )
                             .padding([0,5]).height(iced::Length::Fill).on_press(QVMsg::Clip(fqp)),
-                        button( text("fn").size(max(self.args.font_size,10)).color(color!(0x000000)) )
+                        button( text("fn").size(max(self.config.font_size,10)).color(color!(0x000000)) )
                             .padding([0,5]).height(iced::Length::Fill).on_press(QVMsg::Clip(fname.into()))
                     ].spacing(5)
                 );
@@ -969,7 +981,7 @@ impl QuickViewer {
             Err(_) =>   format!("{:<10}","")
         };
 
-        let image_size = text(image_size).size(self.args.font_size).color(color!(0xa368a8)).font(Font::MONOSPACE);
+        let image_size = text(image_size).size(self.config.font_size).color(color!(0xa368a8)).font(Font::MONOSPACE);
 
         let image_dim = match self.img_list.key() {
             Ok(key) => {
@@ -983,7 +995,7 @@ impl QuickViewer {
 
         let image_dim = text(image_dim)
                             .wrapping(Wrapping::None)
-                            .size(self.args.font_size)
+                            .size(self.config.font_size)
                             .color(color!(0xFD5E53))
                             .font(Font::MONOSPACE);
 
@@ -1002,7 +1014,7 @@ impl QuickViewer {
 
         let image_dt = text(image_dt.0)
                         .wrapping(Wrapping::None)
-                        .size(self.args.font_size)
+                        .size(self.config.font_size)
                         .color(image_dt.1);
 
         let clr = match self.show_when_loaded {
@@ -1015,10 +1027,10 @@ impl QuickViewer {
             container(
                 container(
                     row![
-                        button( text("stop").size(max(self.args.font_size,12)-2 )).padding([0,2]).height(iced::Length::Shrink).on_press(QVMsg::CancelFileFind),
+                        button( text("stop").size(max(self.config.font_size,12)-2 )).padding([0,2]).height(iced::Length::Shrink).on_press(QVMsg::CancelFileFind),
                         container(
                             text(self.current_scan_dir.clone())
-                                .size(max(self.args.font_size,12)-2)
+                                .size(max(self.config.font_size,12)-2)
                                 .color(color!(0xFFFFFF))
                                 .width(iced::Length::Fill)
                                 .height(iced::Length::Fill)
@@ -1048,7 +1060,7 @@ impl QuickViewer {
         // Shows the pending cache load
         let cache_status = if self.pending_image_requests.len() > 0 {
             let c = self.pending_image_requests.len();
-            let b = (self.args.look_ahead + self.args.look_behind) as f32;
+            let b = (self.config.look_ahead + self.config.look_behind) as f32;
             container(
                 progress_bar(0.0..=b,b-c as f32)
                     .length(50)
@@ -1072,22 +1084,22 @@ impl QuickViewer {
 
 
         let counter =
-        if self.args.font_size > 0 {
+        if self.config.font_size > 0 {
         if t == 0 {
-            row![ text!("No images").size(self.args.font_size).color(color!(0xC5B358)) ].height(20)
+            row![ text!("No images").size(self.config.font_size).color(color!(0xC5B358)) ].height(20)
         } else {
             row![
                 row!(
                     text!("{:>12}", num(c))
-                        .size(self.args.font_size)
+                        .size(self.config.font_size)
                         .color(clr)
                         .font(Font::MONOSPACE),
                     text!("/")
-                        .size(self.args.font_size)
+                        .size(self.config.font_size)
                         .color(color!(0xafafaf))
                         .font(Font::MONOSPACE),
                     text!("{:<12}", num(t))
-                        .size(self.args.font_size)
+                        .size(self.config.font_size)
                         .color(color!(0x536878))
                         .font(Font::MONOSPACE)
                 ),
@@ -1105,7 +1117,7 @@ impl QuickViewer {
         // EXIF info table
         type Tbl<'a> = Container<'a, QVMsg, Theme, Renderer>;
         let exif_info:Tbl =
-        if self.args.view_exif {
+        if self.config.view_exif {
             match self.has_exif() {
                 None      => { container( row![]) },
                 Some(exf) => {
@@ -1113,8 +1125,8 @@ impl QuickViewer {
                     scrollable(
                     table(
                         [
-                            // table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.ifd_num).size(self.args.font_size).color(color!(0x7f7f7f)) ),
-                            table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.tag    ).size(max(self.args.font_size,10)).color(color!(0xafafaf)) ),
+                            // table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.ifd_num).size(self.config.font_size).color(color!(0x7f7f7f)) ),
+                            table::column(text!("").height(1), |f:&exif::Field| text!("{}",f.tag    ).size(max(self.config.font_size,10)).color(color!(0xafafaf)) ),
                             table::column(text!("").height(1), |f:&exif::Field| {
                                 use exif::Tag;
                                 let d = match f.tag {
@@ -1148,7 +1160,7 @@ impl QuickViewer {
                                     d
                                 };
 
-                                mouse_area(text!("{}",d.1).color(d.0).size(max(self.args.font_size,10))).on_press(QVMsg::Clip(f.display_value().with_unit(f).to_string()))
+                                mouse_area(text!("{}",d.1).color(d.0).size(max(self.config.font_size,10))).on_press(QVMsg::Clip(f.display_value().with_unit(f).to_string()))
                             })
                         ],
                         &mut exf.fields()
@@ -1171,7 +1183,7 @@ impl QuickViewer {
         else { container(row![]) };
 
 
-        let cache_load_display = if self.args.view_cache_look_ahead {
+        let cache_load_display = if self.view_cache_look_ahead {
             if self.pending_image_requests.len() > 0 {
                 container(
                     container(
@@ -1187,7 +1199,7 @@ impl QuickViewer {
                                     .into()
                             } )
                         )
-                        .padding( Padding::default().bottom( std::cmp::min(self.args.font_size,20) as f32 ) )
+                        .padding( Padding::default().bottom( std::cmp::min(self.config.font_size,20) as f32 ) )
                     )
 
                     .style( |_| {
@@ -1270,122 +1282,17 @@ impl QuickViewer {
     }
 
     pub fn subscription(&self) -> Subscription<QVMsg> {
-        use keyboard::Event         as EV;
-        use keyboard::Key           as KK;
-        use keyboard::key::Named    as KN;
-
         let mut s = vec![
-            keyboard::listen().filter_map(|event|
-
-            match event {
-                EV::KeyPressed { key: KK::Named(key), ..} => match key {
-
-                    // KN::ArrowUp      => Some(QVMsg::Up),
-                    KN::ArrowLeft    => Some(QVMsg::Left),
-                    // KN::ArrowDown    => Some(QVMsg::Down),
-                    KN::ArrowRight   => Some(QVMsg::Right),
-                    KN::PageDown     => Some(QVMsg::PageDown),
-                    KN::PageUp       => Some(QVMsg::PageUp),
-                    KN::Space        => Some(QVMsg::Space),
-                    KN::Home         => Some(QVMsg::Home),
-                    KN::End          => Some(QVMsg::End),
-                    KN::Escape       => Some(QVMsg::Quit),
-                    KN::F11          => Some(QVMsg::FullScreenToggle),
-                    // KN::Alt          => { cprintln!("{:?}",event); None },
-                    // a  => { cprintln!("~[c197]{a:?}"); None }
-                    _ => None,
-                },
-
-
-                EV::KeyPressed { text: Some(ref v), modifiers,.. }
-                    if  modifiers == keyboard::Modifiers::SHIFT ||
-                        modifiers == keyboard::Modifiers::NONE      => match v.as_ref() {
-                    "A" => { cprintln!("A"); None },
-                    "!" => { cprintln!("!"); None },
-                    "1" => { cprintln!("{v} "); None },
-                    "f" => Some(QVMsg::FullScreenToggle),
-                    "q" => Some(QVMsg::Quit),
-                    "s" => Some(QVMsg::Sort),
-                    "S" => Some(QVMsg::SortSize),
-                    "d" => Some(QVMsg::SortDate),
-                    "h" => Some(QVMsg::Shuffle),
-                    "r" => Some(QVMsg::RandomImage),
-                    "[" => Some(QVMsg::DecDelay),
-                    "]" => Some(QVMsg::IncDelay),
-                     // a  => { cprintln!("~[c197]{a}"); None }
-                     _  => None,
-                },
-
-                EV::KeyPressed { key: KK::Character(ref key), modifiers: keyboard::Modifiers::ALT, text:Some(_text),..} => match key.as_ref() {
-                    "w" => {cprintln!("Alt W"); None },
-                    "1" => {cprintln!("Alt 1"); None },
-                    "d" => { Some(QVMsg::LookAheadDisplayToggle) }
-                    "e" => { Some(QVMsg::ExifDisplayToggle) }
-                     // a  => { cprintln!("~[c197]Alt {text}"); None }
-                     _  => None,
-                },
-                EV::KeyPressed { key: KK::Character(ref key), modifiers: keyboard::Modifiers::CTRL, ..} => match key.as_ref() {
-                    "w" => {cprintln!("Ctrl w"); None },
-                    "-" => { Some(QVMsg::FontDown) },
-                    "+" => { Some(QVMsg::FontUp) },
-                    "=" => { Some(QVMsg::FontUp) },
-                     // a  => { cprintln!("~[c197]Ctrl {key}"); None }
-                     _  => None,
-                },
-                EV::KeyPressed { key: KK::Character(ref key), modifiers: keyboard::Modifiers::SHIFT, ..} => match key.as_ref() {
-                    "w" => {cprintln!("W {event:?}"); None },
-                    "a" => {cprintln!("a {event:?}"); None },
-                    "1" => {cprintln!("1 {event:?}"); None },
-                     // a  => { cprintln!("4: {key:?}"); None }
-                     _  => None,
-                },
-
-
-                // EV::KeyPressed { key: KK::Character(ref key), ..} => match key.as_ref() {
-                //      // a  => { cprintln!("4: {event:?}"); None }
-                //      _  => None,
-                // },
-                _ => None,
-            }),
-
         ];
 
-
         use iced::time;
-        if self.args.slideshow {
-            s.push( time::every(time::Duration::from_millis(self.args.delay)).map(QVMsg::Slide) );
-        }
-
-
-        s.push( iced::window::events().map(|x| {
-            match x {
-                (_,iced::window::Event::FileDropped(x)) => {
-                    QVMsg::FileDropped(x)
-                },
-                (_,_) => { QVMsg::Noop }
-            }
-        } ) );
-
-
-        if self.args.window_frames {
-            s.push( iced::window::frames().map(|x| {
-                cprintln!("{:?}",x);
-                QVMsg::Noop } ) );
+        if self.config.slideshow {
+            s.push( time::every(time::Duration::from_millis(self.config.delay)).map(QVMsg::Slide) );
         }
 
         Subscription::batch(s)
     }
-
-    pub fn theme(&self) -> Theme {
-        // Theme::Moonfly
-        // Theme::Oxocarbon
-        // Theme::Ferra
-        // Theme::Dracula
-        Theme::TokyoNight
-        // Theme::KanagawaWave
-        // Theme::Nightfly
-    }
-
+    
 }
 
 
