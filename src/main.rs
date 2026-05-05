@@ -85,6 +85,7 @@ use iced::advanced::image::Error      as AllocError;
 enum Message {
     Left,
     Right,
+    Slide(Instant),
 
     DecDelay,
     IncDelay,
@@ -833,6 +834,17 @@ impl QuickViewer {
                 }
             }
 
+            Message::Slide(_tick) => {
+                if self.show_when_loaded.is_some() {
+                    Task::none()
+                } else {
+                    let Some(next_idx) = self.img_list.peek_range(-1..=-1).next() else {
+                        return Task::none();
+                    };
+                    self.goto_image_task(next_idx)
+                }
+            }
+
             Message::Right => {
 
                 if self.show_when_loaded.is_some() {
@@ -1262,10 +1274,9 @@ impl QuickViewer {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        use keyboard::Event as EV;
-        use keyboard::Key as KK;
-        use keyboard::key::Named as KN;
-
+        use keyboard::Event         as EV;
+        use keyboard::Key           as KK;
+        use keyboard::key::Named    as KN;
 
         let mut s = vec![
             keyboard::listen().filter_map(|event|
@@ -1346,7 +1357,7 @@ impl QuickViewer {
 
         use iced::time;
         if self.args.slideshow {
-            s.push( time::every(time::Duration::from_millis(self.args.delay)).map(|_| Message::Right) );
+            s.push( time::every(time::Duration::from_millis(self.args.delay)).map(Message::Slide) );
         }
 
 
