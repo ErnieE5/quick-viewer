@@ -3228,23 +3228,12 @@ name = "qv"
 version = "0.1.0"
 dependencies = [
  "clap",
- "dyn-clone",
  "ee-conio",
  "ee-viewer",
- "fastrand",
- "globset",
- "humansize",
  "iced",
  "iced_core",
  "image",
- "kamadak-exif",
  "libheif-rs",
- "lru 0.17.0",
- "num-format",
- "serde",
- "time",
- "tokio",
- "walkdir",
 ]
 
 [[package]]
