@@ -1,17 +1,19 @@
 // #![allow(unused_imports)]
 use ee_conio::{cprintln};
+use ee_viewer::doink;
 
 mod args;
-mod viewer;
-mod img_traits;
-mod img_list;
-mod list_files;
-mod toast;
+
+// mod viewer;
+// mod img_traits;
+// mod img_list;
+// mod list_files;
+// mod toast;
 
 
 const MIN_DELAY: u64 = 5;
 
-use crate::viewer::{QuickViewer,QVConfig,QVMsg};
+use ee_viewer::{QuickViewer,QVConfig,QVMsg};
 use crate::args::{Args};
 
 use iced::time::Instant;
@@ -254,9 +256,11 @@ pub fn main() -> IcedResult {
     #[cfg(feature = "heif")]
     libheif_rs::integration::image::register_all_decoding_hooks();
 
+    doink();
+
     let settings = Settings {
         transparent:true,
-        icon: Some(icon::from_file_data(include_bytes!("../assets/icon.png"),Some(ImageFormat::Png)).expect("1")),
+        icon: Some(icon::from_file_data(include_bytes!("../../assets/icon.png"),Some(ImageFormat::Png)).expect("1")),
         ..Settings::default()
     };
 

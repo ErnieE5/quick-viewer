@@ -286,7 +286,7 @@ impl QuickViewer {
 
             empty_image: {
                 let (w,h,d) = if !config.no_empty_cat {
-                    whd_from_asset!("../assets/jasper.png")
+                    whd_from_asset!("../../assets/jasper.png")
                 }
                 else {
                     // 1 pixel zero opacity RGBA
@@ -308,7 +308,7 @@ impl QuickViewer {
             loop_start:     Instant::now(),
             now:            Instant::now(),
             img_list:       ImageList::new(),
-            
+
 
             current_image_handle:   None,
             view_cache_look_ahead:  false,
@@ -564,19 +564,19 @@ impl QuickViewer {
             }
 
             QVMsg::ImageLoaded(Err(ImageError::ErrorOpeningImageFile(key))) => {
-                self.handle_error_task(key,"ErrorOpeningImageFile",include_bytes!("../assets/open_error.png"))
+                self.handle_error_task(key,"ErrorOpeningImageFile",include_bytes!("../../assets/open_error.png"))
             },
 
             QVMsg::ImageLoaded(Err(ImageError::ErrorReadingImageFile(key))) => {
-                self.handle_error_task(key,"ErrorReadingImageFile",include_bytes!("../assets/read_error.png"))
+                self.handle_error_task(key,"ErrorReadingImageFile",include_bytes!("../../assets/read_error.png"))
             },
 
             QVMsg::ImageLoaded(Err(ImageError::ErrorGuessingFormat(key))) => {
-                self.handle_error_task(key,"ErrorGuessingFormat",include_bytes!("../assets/format_error.png"))
+                self.handle_error_task(key,"ErrorGuessingFormat",include_bytes!("../../assets/format_error.png"))
             },
 
             QVMsg::ImageLoaded(Err(ImageError::ErrorDecodingImage(key))) => {
-                self.handle_error_task(key,"ErrorDecodingImage",include_bytes!("../assets/decode_error.png"))
+                self.handle_error_task(key,"ErrorDecodingImage",include_bytes!("../../assets/decode_error.png"))
             },
 
 
@@ -848,7 +848,7 @@ impl QuickViewer {
                             self.img_list.random().expect("")
                         },
                     };
-                   
+
                     self.goto_image_task(next_idx)
                 }
             }
@@ -1292,7 +1292,7 @@ impl QuickViewer {
 
         Subscription::batch(s)
     }
-    
+
 }
 
 
