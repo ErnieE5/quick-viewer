@@ -1,19 +1,11 @@
 // #![allow(unused_imports)]
 use ee_conio::{cprintln};
-use ee_viewer::doink;
+use ee_viewer::{QuickViewer,QVConfig,QVMsg,RenderMode};
 
 mod args;
 
-// mod viewer;
-// mod img_traits;
-// mod img_list;
-// mod list_files;
-// mod toast;
-
-
 const MIN_DELAY: u64 = 5;
 
-use ee_viewer::{QuickViewer,QVConfig,QVMsg};
 use crate::args::{Args};
 
 use iced::time::Instant;
@@ -21,9 +13,7 @@ use iced::time::Instant;
 use iced::widget::{
     Theme,
     container,
-    // mouse_area,
     row,
-    // text,
 };
 
 use iced::{
@@ -32,24 +22,19 @@ use iced::{
     Element,
     Subscription,
     Task,
-    // Background,
-    // Padding,
-    // Renderer,
-    // border,
-    // color,
-    // keyboard,
-    // clipboard,
-    // alignment::Vertical,
-    // alignment::Horizontal,
-    // window,
     window::{Id,Event,Settings,icon},
     Result as IcedResult
 };
 
-use image::{self,ImageFormat};
+use image::{
+    self,
+    ImageFormat
+};
 
 
+#[derive(Debug, Clone)]
 enum Msg {
+
     Welcome,
     Huh,
     WindowEvent( (Id,Event) ),
@@ -59,6 +44,7 @@ enum Msg {
     Qv(QVMsg),
 }
 
+#[derive(Debug)]
 struct App {
     args:                       Args,
     fullscreen:                 bool,
@@ -82,6 +68,7 @@ impl App {
         config.delay                = args.delay;
         config.max_depth            = args.max_depth;
         config.time_forward_loop    = args.time_forward_loop;
+        config.primary_render       = if args.no_canvas { RenderMode::Image } else { RenderMode::Canvas };
 
         Self {
             qv:             QuickViewer::new(config),
@@ -255,8 +242,6 @@ impl App {
 pub fn main() -> IcedResult {
     #[cfg(feature = "heif")]
     libheif_rs::integration::image::register_all_decoding_hooks();
-
-    doink();
 
     let settings = Settings {
         transparent:true,

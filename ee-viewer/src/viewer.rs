@@ -2,7 +2,7 @@
 use ee_conio::{cprintln};
 
 
-const MIN_DELAY: u64 = 5;
+const MIN_DELAY: u64 = 1;
 
 use crate::toast::{self,Toast};
 // use crate::args;
@@ -16,13 +16,14 @@ use crate::img_list::{ImageList};
 
 
 use iced::mouse::{ ScrollDelta };
-use iced::time::Instant;
+use iced::time::{Duration,Instant};
 use iced::widget::image::Handle as ImageHandle;
 use iced::widget::text::Wrapping;
 
 use iced::task::Handle as TaskHandle;
 
 use std::hash::{Hash, Hasher};
+
 
 use iced::widget::{
     Container,
@@ -92,6 +93,19 @@ impl SlideMode {
     }
 }
 
+#[derive(Debug, Clone,Copy)]
+pub enum RenderMode {
+    Viewer,
+    Image,
+    Canvas,
+}
+
+#[derive(Debug, Clone)]
+pub enum ImageCacheItem {
+    Alloc(ImageAllocation,Duration),
+    Handle(ImageHandle),
+}
+
 #[derive(Debug, Clone)]
 pub enum QVMsg {
     Welcome,
@@ -123,7 +137,6 @@ pub enum QVMsg {
     PageUp,
     Home,
     End,
-    // Noop,
     Clip(String),
     #[allow(unused)]
     ClipResult(Result<(), std::fmt::Error>),
@@ -131,7 +144,7 @@ pub enum QVMsg {
 
     RequestAnImage(ImageKey),
     ImageLoaded( Result<LoadData, ImageError>),
-    ImageCached( ImageKey, Result<ImageAllocation,AllocError> ),
+    ImageCached( ImageKey, Instant, Result<ImageAllocation,AllocError> ),
 
     FindFilesOnPath,
     FindFilesProgress(ScanProgress),
@@ -191,6 +204,7 @@ pub struct QVConfig
     pub dirs:               Vec<String>,
     pub max_depth:          usize,
     pub time_forward_loop:  bool,
+    pub primary_render:     RenderMode,
 }
 
 
@@ -208,6 +222,7 @@ impl QVConfig {
             dirs:               Vec::new(),
             max_depth:          10000,
             time_forward_loop:  false,
+            primary_render:     RenderMode::Canvas,
         }
     }
 }
@@ -216,13 +231,14 @@ impl QVConfig {
 #[derive(Debug)]
 pub struct QuickViewer {
     config:                 QVConfig,
+    render_mode:            RenderMode,
     #[allow(unused)]
     start:                  Instant,
     loop_start:             Instant,
     now:                    Instant,
     img_list:               ImageList,
 
-    loaded_image_info:          HashMap<ImageKey,LoadData>,
+
 
 
     toasts: Vec<Toast>,
@@ -230,7 +246,8 @@ pub struct QuickViewer {
     view_cache_look_ahead:      bool,
     show_when_loaded:           Option<ImageKey>,
     current_image_handle:       Option<ImageHandle>,
-    cache_image_alloc:          LruCache<ImageKey, ImageAllocation>,
+    loaded_image_info:          HashMap<ImageKey,LoadData>,
+    image_cache:                LruCache< ImageKey, ImageCacheItem >,
     pending_image_requests:     HashMap<ImageKey,CacheData>,
 
     scan_dir_task:              Option<TaskHandle>,
@@ -282,7 +299,9 @@ macro_rules! whd_from_asset {
 impl QuickViewer {
     pub fn new(config: QVConfig) -> Self {
         Self {
-            cache_image_alloc:  LruCache::new(ImageKey::new(config.cache_size).unwrap()),
+            image_cache: LruCache::new(ImageKey::new(config.cache_size).unwrap()),
+
+            render_mode:  config.primary_render,
 
             empty_image: {
                 let (w,h,d) = if !config.no_empty_cat {
@@ -329,15 +348,24 @@ impl QuickViewer {
             Err(_) => { return false; }
         };
 
-        match self.cache_image_alloc.get( &key ) {
+        match self.image_cache.get(&key) {
             None => false,
-            Some(h) => {
-                if Some(h.handle()) != self.current_image_handle.as_ref() {
-                    self.current_image_handle = Some(h.handle().clone());
+            Some(ImageCacheItem::Handle(h)) => {
+                if Some(h) != self.current_image_handle.as_ref() {
+                    self.current_image_handle = Some(h.clone());
+                    self.show_when_loaded = None;
+                }
+                true
+            },
+            Some(ImageCacheItem::Alloc(a,d)) => {
+                cprintln!("~[c45]{d:?}");
+                if Some(a.handle()) != self.current_image_handle.as_ref() {
+                    self.current_image_handle = Some(a.handle().clone());
                     self.show_when_loaded = None;
                 }
                 true
             }
+
         }
     }
 
@@ -371,7 +399,7 @@ impl QuickViewer {
         // If it isn't already in the cache, request that it be loaded in
         // anticipation that we will want it soon.
         let mut add_to_batch = |key| {
-            if self.cache_image_alloc.get(&key).is_none() {
+            if self.image_cache.get(&key).is_none() {
                 match self.pending_image_requests.get(&key) {
                     None => {
                         match self.pending_image_requests.insert(key,CacheData::new(key)) {
@@ -383,6 +411,7 @@ impl QuickViewer {
 
                 }
             }
+
         };
 
         let il = &self.img_list;
@@ -595,18 +624,48 @@ impl QuickViewer {
 
                 self.loaded_image_info.insert(ls.id,ls);
 
-                iced_image::allocate(handle).map(move |alloc| { QVMsg::ImageCached(key,alloc) } )
+                match self.render_mode {
+                    RenderMode::Canvas => {
+                        self.image_cache.push(key, ImageCacheItem::Handle(handle));
+
+                        let Some(_) = self.pending_image_requests.remove(&key) else {
+                            // cprintln!("{k} missed   ");
+                            return Task::none();
+                        };
+
+                        if Some(key) == self.show_when_loaded {
+
+                            let _ = match self.img_list.find_index(key)
+                            {
+                                Ok(i) => match self.img_list.goto(i) { Ok(i) => i, Err(_) => { panic!(); } },
+                                Err(_) => { panic!(); }
+                            };
+
+                            if self.showit() {
+                                self.show_when_loaded = None;
+                            }
+                        }
+                        Task::none()
+                    },
+                    RenderMode::Image |
+                    RenderMode::Viewer => {
+                        iced_image::allocate(handle).map(move |alloc| { QVMsg::ImageCached(key,now,alloc) } )
+                    }
+                }
+
+                //
+
+
             },
 
-            QVMsg::ImageCached(k,Ok(a) ) => {
+            QVMsg::ImageCached(k,f,Ok(a) ) => {
                 // cprintln!("~[c255]{:?},~[c51]{k:x}  {:?}",self.now-self.start,a.handle());
                 let Some(_) = self.pending_image_requests.remove(&k) else {
                     // cprintln!("{k} missed   ");
                     return Task::none();
                 };
 
-
-                self.cache_image_alloc.push(k, a);
+                self.image_cache.push( k, ImageCacheItem::Alloc(a,Instant::now()-f));
 
                 if Some(k) == self.show_when_loaded {
 
@@ -624,7 +683,7 @@ impl QuickViewer {
                 Task::none()
             }
 
-            QVMsg::ImageCached( _k,Err(_e) ) => {
+            QVMsg::ImageCached( _k,_f,Err(_e) ) => {
                 // cprintln!("~[c255]{:?},QVMsg::ImageCached {k:x} -- {e:?}",self.now-self.start);
                 Task::none()
             }
@@ -793,7 +852,15 @@ impl QuickViewer {
 
             QVMsg::Swap => {
                 self.zoom=!self.zoom;
-                Task::none()
+                if self.zoom {
+                    self.render_mode = RenderMode::Viewer;
+                }
+                else {
+                    self.render_mode = self.config.primary_render;
+                }
+                self.image_cache = LruCache::new(ImageKey::new(self.config.cache_size).unwrap());
+
+                self.preload_task(false)
             }
 
             QVMsg::Scrolled(ScrollDelta::Pixels{x: _, y: _}) => { Task::none() }
@@ -837,6 +904,7 @@ impl QuickViewer {
             }
 
             QVMsg::Slide(_tick) => {
+                if self.img_list.is_empty() { return Task::none(); }
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 } else {
@@ -848,6 +916,19 @@ impl QuickViewer {
                             self.img_list.random().expect("")
                         },
                     };
+
+                    if self.config.time_forward_loop {
+                        if next_idx == ImageKey::new(1).expect("reality")
+                        {
+                            if !self.toasts.is_empty() {
+                                self.toasts[0].message = format!("{:?}",now-self.loop_start);
+                            }
+                            cprintln!("{:?}",now-self.loop_start);
+                            self.loop_start = Instant::now();
+                            return iced::exit();
+                        }
+                    }
+
 
                     self.goto_image_task(next_idx)
                 }
@@ -861,17 +942,6 @@ impl QuickViewer {
                     let Some(next_idx) = self.img_list.peek_range(1..=1).next() else {
                         return Task::none();
                     };
-
-                    if self.config.time_forward_loop {
-                        if next_idx == ImageKey::new(1).expect("reality")
-                        {
-                            if !self.toasts.is_empty() {
-                                self.toasts[0].message = format!("{:?}",now-self.loop_start);
-                            }
-                            cprintln!("{:?}",now-self.loop_start);
-                            self.loop_start = Instant::now();
-                        }
-                    }
 
                     self.goto_image_task(next_idx)
                 }
@@ -987,10 +1057,10 @@ impl QuickViewer {
             Ok(key) => {
                 match self.loaded_image_info.get(&key) {
                     Some(i) =>  format!("{: >6} x {: <6}",num(i.dimensions.width),num(i.dimensions.height)),
-                    None    =>  format!("{0:>6}   {0:>6}","")
+                    None    =>  format!("{0:>6}!!!{0:>6}","")
                 }
             },
-            Err(_)  =>          format!("{0:>6}   {0:>6}","")
+            Err(_)  =>          format!("{0:>6}***{0:>6}","")
         };
 
         let image_dim = text(image_dim)
@@ -1233,13 +1303,11 @@ impl QuickViewer {
             None => self.empty_image.clone()
         };
 
-        let img = if self.zoom {
-            container( viewer(h).width(Fill).height(Fill) )
-        }
-        else {
-            container( iced_image(h).width(Fill).height(Fill) )
+        let img = match self.render_mode {
+            RenderMode::Viewer => container( viewer(h)      .width(Fill).height(Fill) ),
+            RenderMode::Image  => container( iced_image(h)  .width(Fill).height(Fill) ),
+            RenderMode::Canvas => container( canvas(self)   .width(Fill).height(Fill) ),
         };
-        // let img = container(canvas(self).width(Fill).height(Fill));
 
         let content =
             stack![
@@ -1295,5 +1363,81 @@ impl QuickViewer {
 
 }
 
+use iced::mouse;
+use iced::widget::canvas;
+use iced::widget::canvas::{ Program, Frame };
+
+use iced::{ Rectangle, Size, Point, };
+use iced_core::image::Renderer as CoreRenderer;
+
+impl QuickViewer {
+
+
+    fn fit(&self,bounds: Rectangle, w: f32, h: f32) -> Rectangle {
+        let rw = bounds.width / w;
+        let rh = bounds.height / h;
+
+        let q = if (w * rw).floor() <= bounds.width && (h * rw).floor() <= bounds.height {
+            Size::new(w * rw * 1.0/*self.scale_factor*/, h * rw * 1.0/*self.scale_factor*/)
+        } else if (w * rh).floor() <= bounds.width && (h * rh).floor() <= bounds.height {
+            Size::new(w * rh * 1.0/*self.scale_factor*/, h * rh * 1.0/*self.scale_factor*/)
+        } else {
+            cprintln!("{w:?} {h:?} {bounds:?} {rw:?} {rh:?}");
+            Size::new(0.0, 0.0);
+            todo!();
+        };
+
+        let a = Point::new(
+            (bounds.width - q.width) / 2.0,
+            (bounds.height - q.height) / 2.0,
+        );
+
+        Rectangle::new(a, q)
+    }
+}
+
+
+
+
+impl<Message> Program<Message> for QuickViewer {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+
+        if let Some(han) = self.current_image_handle.clone() {
+            match renderer.load_image(&han) {
+                Ok(_) => {}
+                Err(_) => {
+                    todo!();
+                }
+            }
+
+            let (w, h) = match renderer.measure_image(&han) {
+                Some(g) => (g.width as f32, g.height as f32),
+                None    => (0.0, 0.0),
+            };
+
+            frame.draw_image( self.fit(bounds, w , h), &han.clone());
+        } else {
+
+            let (w, h) = match renderer.measure_image(&self.empty_image) {
+                Some(g) => (g.width as f32, g.height as f32),
+                None    => (0.0, 0.0),
+            };
+
+            frame.draw_image( self.fit(bounds, w , h), &self.empty_image.clone());
+        }
+
+        vec![frame.into_geometry()]
+    }
+}
 
 

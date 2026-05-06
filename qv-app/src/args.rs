@@ -67,10 +67,13 @@ pub struct Args {
     #[arg(long)]
     pub time_forward_loop: bool,
 
-    /// List of files and/or directories
-     #[arg(value_name="FILES/DIRS", default_values_t = vec![String::from(".")])]
-    pub dirs: Vec<String>,
+    #[arg(long)]
+    pub no_canvas: bool,
 
+
+    /// List of files and/or directories
+    #[arg(value_name="FILES/DIRS", default_values_t = vec![String::from(".")])]
+    pub dirs: Vec<String>,
 }
 
 

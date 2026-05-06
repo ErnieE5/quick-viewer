@@ -1,7 +1,7 @@
 [workspace]
 members=[
     "ee-viewer",
-    "qv-app",
+    "qv-app"
 ]
 
 resolver="3"

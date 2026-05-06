@@ -1,6 +1,4 @@
 
-// use ee_conio::cprintln as cprintf;
-// use ee_conio::cprintln;
 use std::fmt;
 use std::fmt::{Display,Formatter};
 use std::ops::{RangeBounds,Bound};

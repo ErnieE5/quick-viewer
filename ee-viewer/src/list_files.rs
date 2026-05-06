@@ -16,6 +16,7 @@ use std::fs::File;
 use std::io::{ Seek, SeekFrom };
 
 use iced::Size;
+use iced::Task;
 use iced::task::{Straw, sipper};
 use std::collections::{VecDeque};
 
@@ -122,7 +123,6 @@ impl ImageOrigin for FileSystemImage {
         self.ftime.truncate_to_second()
     }
 }
-
 
 impl Ord for FileSystemImage {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -368,11 +368,6 @@ impl FileSystemHelper {
 
     pub async fn load_image(fqp:PathBuf,id:NonZeroUsize)
         -> Result<LoadData, ImageError> {
-
-        let _ext = match fqp.as_path().extension() {
-            Some(ext) => match ext.to_str() { None => { "" }, Some(ext) => ext, }
-            None => { "" }
-        };
 
         let open = Instant::now();
         let file = match File::open(&fqp) {
