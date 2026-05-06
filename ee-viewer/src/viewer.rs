@@ -7,10 +7,10 @@ const MIN_DELAY: u64 = 1;
 use crate::toast::{self,Toast};
 // use crate::args;
 
-use crate::list_files::ScanProgress;
 
-use crate::img_traits::{ImageError,LoadData};
-use crate::list_files::{FileSystemHelper};
+use crate::img_traits::{ImageError,ImageDyn};
+use crate::file_traits::{LoadData};
+use crate::file_provider::{FileSystemHelper};
 
 use crate::img_list::{ImageList};
 
@@ -67,7 +67,7 @@ use iced::{
 };
 
 use std::collections::{ HashMap };
-use std::path::PathBuf;
+// use std::path::PathBuf;
 use std::cmp::max;
 
 use lru::LruCache;
@@ -84,11 +84,11 @@ pub enum SlideMode {
 }
 
 impl SlideMode {
-    pub fn next(&mut self) -> Self {
+    pub fn next(&self) -> Self {
         match self {
             SlideMode::Forward => SlideMode::Reverse,
             SlideMode::Reverse => SlideMode::Random,
-            SlideMode::Random => SlideMode::Forward,
+            SlideMode::Random  => SlideMode::Forward,
         }
     }
 }
@@ -131,7 +131,6 @@ pub enum QVMsg {
     Shuffle,
     Swap,
     Scrolled(ScrollDelta),
-    FileDropped(PathBuf),
     RandomImage,
     PageDown,
     PageUp,
@@ -142,15 +141,13 @@ pub enum QVMsg {
     ClipResult(Result<(), std::fmt::Error>),
     ByeToaster(usize),
 
+    AddFiles(Vec<Box<dyn ImageDyn>>),
+
     RequestAnImage(ImageKey),
     ImageLoaded( Result<LoadData, ImageError>),
     ImageCached( ImageKey, Instant, Result<ImageAllocation,AllocError> ),
 
-    FindFilesOnPath,
-    FindFilesProgress(ScanProgress),
-    FileFindComplete ,
-    CancelFileFind,
-
+    UpdateCache,
 
 }
 
@@ -250,9 +247,6 @@ pub struct QuickViewer {
     image_cache:                LruCache< ImageKey, ImageCacheItem >,
     pending_image_requests:     HashMap<ImageKey,CacheData>,
 
-    scan_dir_task:              Option<TaskHandle>,
-    current_scan_dir:           String,
-
     zoom:                       bool,
     slide_mode:                 SlideMode,
 
@@ -333,10 +327,9 @@ impl QuickViewer {
             view_cache_look_ahead:  false,
             show_when_loaded:       None,
             pending_image_requests: HashMap::new(),
-            scan_dir_task:          None,
+
             zoom:                   false,
             slide_mode:             SlideMode::Forward,
-            current_scan_dir:       "".into(),
 
             config
         }
@@ -477,7 +470,7 @@ impl QuickViewer {
         self.now = now;
         // cprintln!("~[c7]{:?}    {:40.40}",now-self.start,format!("{:?}",event) );
         match event {
-            QVMsg::Welcome  =>    { Task::done( QVMsg::FindFilesOnPath ) }
+            QVMsg::Welcome  =>    { Task::none() }
             // QVMsg::Noop     =>    { Task::none() },
 
             QVMsg::Clip(s)            => { clipboard::write(s) },
@@ -688,24 +681,11 @@ impl QuickViewer {
                 Task::none()
             }
 
+            QVMsg::UpdateCache => {
+                self.preload_task(false)
+            }
 
-            QVMsg::FindFilesProgress(p) => {
-
-                let list = match p {
-                    ScanProgress::CurrentDir(d) => { self.current_scan_dir=d; return Task::none(); }
-                    ScanProgress::SomeFiles(l)  => l,
-                    // ScanProgress::More(d) => {
-                    //     // cprintln!("~[c51]{d21}");
-                    //     self.current_scan_dir=d.clone();
-                    //     let (m,h) = Task::sip(
-                    //         FileSystemHelper::find_files_sipper(vec![d],1),
-                    //         QVMsg::FindFilesProgress,
-                    //         | _e | { QVMsg::FileFindComplete }
-                    //     ).abortable();
-                    //     return m;
-                    // }
-
-                };
+            QVMsg::AddFiles(list) => {
 
                 if self.img_list.is_empty() && !list.is_empty() {
 
@@ -723,37 +703,8 @@ impl QuickViewer {
                     self.img_list.append(list);
                     Task::none()
                 }
-            },
-            QVMsg::FileFindComplete => {
-                self.scan_dir_task = None;
-                return self.preload_task(false);
-            },
 
-            QVMsg::CancelFileFind => {
-                match &self.scan_dir_task {
-                    None => { },
-                    Some(h) => {
-                        h.abort();
-                        self.scan_dir_task = None;
-                    }
-                }
-                return self.preload_task(false);
-            },
-
-
-            QVMsg::FindFilesOnPath => {
-                let (m,h) = Task::sip(
-                    FileSystemHelper::find_files_sipper(self.config.dirs.clone(),self.config.max_depth),
-                    QVMsg::FindFilesProgress,
-                    | _e | { QVMsg::FileFindComplete }
-                ).abortable();
-
-                self.scan_dir_task = Some(h);
-
-                m
-            },
-
-
+            }
 
             QVMsg::Sort => {
                 let _ = self.img_list.sort();
@@ -875,20 +826,6 @@ impl QuickViewer {
                     self.pending_image_requests.drain();
                     self.goto_image_task(idx)
                 }
-            }
-
-            QVMsg::FileDropped(f) => {
-                cprintln!("{:?}~[c51]{} ",self.now,f.display());
-
-                let (m,h) = Task::sip(
-                    FileSystemHelper::find_files_sipper(vec![f.display().to_string()],self.config.max_depth),
-                    QVMsg::FindFilesProgress,
-                    | _e | { QVMsg::FileFindComplete }
-                ).abortable();
-
-                self.scan_dir_task = Some(h);
-
-                m
             }
 
             QVMsg::Left => {
@@ -1092,41 +1029,6 @@ impl QuickViewer {
             Some(_) => { color!(0xFF00FF)  }
         };
 
-
-        let scan_dir_progress = if self.scan_dir_task.is_some() {
-            container(
-                container(
-                    row![
-                        button( text("stop").size(max(self.config.font_size,12)-2 )).padding([0,2]).height(iced::Length::Shrink).on_press(QVMsg::CancelFileFind),
-                        container(
-                            text(self.current_scan_dir.clone())
-                                .size(max(self.config.font_size,12)-2)
-                                .color(color!(0xFFFFFF))
-                                .width(iced::Length::Fill)
-                                .height(iced::Length::Fill)
-                                .align_x(text::Alignment::Left)
-                                .align_y(Vertical::Center)
-                                .wrapping(Wrapping::None)
-                        )
-                        .width(Length::Shrink)
-
-                        ,
-                    ].spacing(10).padding([0,10]).height(iced::Length::Shrink).width(iced::Length::Fill)
-                )
-                .style( |_| {
-                    CStyle {
-                        background: Some(iced::Background::Color(iced::Color::from_rgba8(0, 0, 0,0.65))),
-                        ..CStyle::default()
-                    }
-                })
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(text::Alignment::Left)
-            .align_y(Vertical::Bottom)
-
-        } else { container( row![] ) };
-
         // Shows the pending cache load
         let cache_status = if self.pending_image_requests.len() > 0 {
             let c = self.pending_image_requests.len();
@@ -1315,7 +1217,6 @@ impl QuickViewer {
                     stack![
                         img,
                         float( exif_info ),
-                        float( scan_dir_progress ),
                         float( cache_load_display ),
                     ],
                     container(counter).width(Fill),

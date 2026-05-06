@@ -1,6 +1,8 @@
 // #![allow(unused_imports)]
 use ee_conio::{cprintln};
-use ee_viewer::{QuickViewer,QVConfig,QVMsg,RenderMode};
+use ee_viewer::{QuickViewer,QVConfig,QVMsg,RenderMode,ScanProgress,FileSystemHelper};
+
+
 
 mod args;
 
@@ -31,6 +33,9 @@ use image::{
     ImageFormat
 };
 
+use iced::task::Handle as TaskHandle;
+
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 enum Msg {
@@ -39,6 +44,14 @@ enum Msg {
     Huh,
     WindowEvent( (Id,Event) ),
     FullScreenToggle,
+
+    FileDropped(PathBuf),
+    FindFilesOnPath,
+    FindFilesProgress(ScanProgress),
+    FileFindComplete ,
+    CancelFileFind,
+
+
     Quit,
     Goodbye,
     Qv(QVMsg),
@@ -49,6 +62,8 @@ struct App {
     args:                       Args,
     fullscreen:                 bool,
     qv:                         QuickViewer,
+    scan_dir_task:              Option<TaskHandle>,
+    current_scan_dir:           String,
 }
 
 impl App {
@@ -71,8 +86,11 @@ impl App {
         config.primary_render       = if args.no_canvas { RenderMode::Image } else { RenderMode::Canvas };
 
         Self {
-            qv:             QuickViewer::new(config),
-            fullscreen:     false,
+            qv:                     QuickViewer::new(config),
+            fullscreen:             false,
+            current_scan_dir:       "".into(),
+            scan_dir_task:          None,
+
             args
         }
     }
@@ -81,7 +99,8 @@ impl App {
 
         let mut m = vec![
             Task::done( Msg::Welcome ),
-            Task::done( Msg::Qv( QVMsg::Welcome ) )
+            Task::done( Msg::Qv( QVMsg::Welcome ) ),
+            Task::done( Msg::FindFilesOnPath ),
         ];
 
         let mut me = App::default();
@@ -104,14 +123,27 @@ impl App {
             }
 
             Msg::WindowEvent( (_id,Event::FileDropped(f)) ) => {
-                self.qv.update(QVMsg::FileDropped(f),now).map(Msg::Qv)
+                Task::done(Msg::FileDropped(f))
             },
             Msg::WindowEvent( _ ) => { Task::none() },
 
+            Msg::FileDropped(f) => {
+                cprintln!("{:?}~[c51]{} ",now,f.display());
+
+                let (m,h) = Task::sip(
+                    FileSystemHelper::find_files_sipper(vec![f.display().to_string()],self.args.max_depth),
+                    Msg::FindFilesProgress,
+                    | _e | { Msg::FileFindComplete }
+                ).abortable();
+
+                self.scan_dir_task = Some(h);
+
+                m
+            }
+
+
             Msg::FullScreenToggle => {
                 use iced::window::{self,Mode};
-
-                // let mut m: Vec<Task<QVMsg>> = vec![];
 
                 let mode = if self.fullscreen  {
                     self.fullscreen = false; Mode::Windowed
@@ -122,6 +154,46 @@ impl App {
 
                 window::latest().and_then(move |id| window::set_mode(id, mode))
             }
+
+            Msg::FindFilesProgress(p) => {
+
+                let list = match p {
+                    ScanProgress::CurrentDir(d) => { self.current_scan_dir=d; return Task::none(); }
+                    ScanProgress::SomeFiles(l)  => l,
+                };
+
+                self.qv.update( QVMsg::AddFiles(list), now ).map(Msg::Qv)
+            },
+
+            Msg::FileFindComplete => {
+                self.scan_dir_task = None;
+                self.qv.update( QVMsg::UpdateCache, now ).map(Msg::Qv)
+            },
+
+            Msg::CancelFileFind => {
+                match &self.scan_dir_task {
+                    None => { },
+                    Some(h) => {
+                        h.abort();
+                        self.scan_dir_task = None;
+                    }
+                }
+                self.qv.update( QVMsg::UpdateCache, now ).map(Msg::Qv)
+            },
+
+
+            Msg::FindFilesOnPath => {
+                let (m,h) = Task::sip(
+                    FileSystemHelper::find_files_sipper(self.args.dirs.clone(),self.args.max_depth),
+                    Msg::FindFilesProgress,
+                    | _e | { Msg::FileFindComplete }
+                ).abortable();
+
+                self.scan_dir_task = Some(h);
+
+                m
+            },
+
 
             Msg::Quit => {
                 use iced::window;
@@ -141,6 +213,44 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Msg> {
+
+        // let scan_dir_progress = if self.scan_dir_task.is_some() {
+        //     container(
+        //         container(
+        //             row![
+        //                 button( text("stop").size(max(self.config.font_size,12)-2 )).padding([0,2]).height(iced::Length::Shrink).on_press(QVMsg::CancelFileFind),
+        //                 container(
+        //                     text(self.current_scan_dir.clone())
+        //                         .size(max(self.config.font_size,12)-2)
+        //                         .color(color!(0xFFFFFF))
+        //                         .width(iced::Length::Fill)
+        //                         .height(iced::Length::Fill)
+        //                         .align_x(text::Alignment::Left)
+        //                         .align_y(Vertical::Center)
+        //                         .wrapping(Wrapping::None)
+        //                 )
+        //                 .width(Length::Shrink)
+
+        //                 ,
+        //             ].spacing(10).padding([0,10]).height(iced::Length::Shrink).width(iced::Length::Fill)
+        //         )
+        //         .style( |_| {
+        //             CStyle {
+        //                 background: Some(iced::Background::Color(iced::Color::from_rgba8(0, 0, 0,0.65))),
+        //                 ..CStyle::default()
+        //             }
+        //         })
+        //     )
+        //     .width(Length::Fill)
+        //     .height(Length::Fill)
+        //     .align_x(text::Alignment::Left)
+        //     .align_y(Vertical::Bottom)
+
+        // } else { container( row![] ) };
+
+        // float( scan_dir_progress ),
+
+
         container(
             row![
                 self.qv.view().map(Msg::Qv)

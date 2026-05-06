@@ -36,7 +36,6 @@ impl Display for PeekWalker
 
         f.write_fmt(format_args!("{p}/{t} remaining:{c}"))
     }
-
 }
 
 

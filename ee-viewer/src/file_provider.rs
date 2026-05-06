@@ -7,7 +7,10 @@ use std::fmt;
 use std::fmt::{Display,Formatter};
 use std::num::NonZeroUsize;
 
-use crate::img_traits::{  ImageDyn, ImageOrigin, LoadData };
+use crate::img_traits::{  ImageDyn, ImageOrigin, ScanProgress };
+
+use crate::file_traits::{ LoadData };
+
 use std::path::{PathBuf,Component};
 use std::time::{Instant};
 
@@ -16,7 +19,6 @@ use std::fs::File;
 use std::io::{ Seek, SeekFrom };
 
 use iced::Size;
-use iced::Task;
 use iced::task::{Straw, sipper};
 use std::collections::{VecDeque};
 
@@ -161,20 +163,6 @@ impl Display for FileSystemImage {
 pub struct FileSystemHelper {
 
 }
-
-
-#[derive(Clone,Debug)]
-pub enum ScanProgress {
-    SomeFiles(Vec<Box<dyn ImageDyn>>),
-    CurrentDir(String),
-    // More(String),
-}
-
-// #[derive(Clone,Debug)]
-// pub struct SomeFiles {
-//     pub current_dir:    String,
-//     pub files:          Vec<Box<dyn ImageDyn>>,
-// }
 
 
 static EXTENSIONS: &'static [&'static str] = &[
