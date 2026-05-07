@@ -28,6 +28,7 @@ pub enum ScanProgress {
 
 
 pub trait ImageOrigin {
+    fn provider(&self)      -> &str;
     fn origin(&self)        -> &str;
     fn group(&self)         -> &str;
     fn name(&self)          -> &str;

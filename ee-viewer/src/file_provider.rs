@@ -30,6 +30,7 @@ use exif::Reader as ExifReader;
 
 #[derive(Debug, Clone)]
 pub struct FileSystemImage {
+    provider:   String,
     fqp:        PathBuf,
     origin:     String,
     group:      String,
@@ -40,7 +41,8 @@ pub struct FileSystemImage {
 
 
 impl FileSystemImage {
-    pub fn from_origin(origin:&PathBuf,fqp:PathBuf) -> Result<FileSystemImage,ImageError> {
+
+    pub fn from_origin<S:AsRef<str>>(provider:S,origin:&PathBuf,fqp:PathBuf) -> Result<FileSystemImage,ImageError> {
 
         let fqp     = fqp.clone();
 
@@ -60,16 +62,17 @@ impl FileSystemImage {
         };
 
         Ok( FileSystemImage {
-            origin: origin.display().to_string(),
-            group:  group.display().to_string(),
-            name:   name.display().to_string(),
+            provider:   provider.as_ref().to_string(),
+            origin:     origin.display().to_string(),
+            group:      group.display().to_string(),
+            name:       name.display().to_string(),
             fqp,
-            size: 0,
-            ftime: time::UtcDateTime::MIN,
+            size:       0,
+            ftime:      time::UtcDateTime::MIN,
         } )
     }
 
-    pub fn from_cl(file:PathBuf) -> Result<FileSystemImage,ImageError>
+    pub fn from_cl<S:AsRef<str>>(provider:S,file:PathBuf) -> Result<FileSystemImage,ImageError>
     {
         let fqp  = file.canonicalize().unwrap();
 
@@ -79,12 +82,13 @@ impl FileSystemImage {
         };
 
         Ok( FileSystemImage {
-            origin: "".into(),
-            group:  "".into(),
-            name:   name.display().to_string(),
+            provider:   provider.as_ref().to_string(),
+            origin:     "".into(),
+            group:      "".into(),
+            name:       name.display().to_string(),
             fqp,
-            size: 0,
-            ftime: time::UtcDateTime::MIN,
+            size:       0,
+            ftime:      time::UtcDateTime::MIN,
         } )
     }
 
@@ -92,6 +96,10 @@ impl FileSystemImage {
 
 
 impl ImageOrigin for FileSystemImage {
+    fn provider(&self) -> &str {
+        &self.provider
+    }
+
     fn origin(&self) -> &str {
         &self.origin
     }
@@ -159,8 +167,78 @@ impl Display for FileSystemImage {
 }
 
 
-
+#[derive(Debug)]
 pub struct FileSystemHelper {
+}
+
+impl FileSystemHelper {
+    pub fn new() -> Self { Self{} }
+    pub async fn load_image(fqp:PathBuf,id:NonZeroUsize)
+        -> Result<LoadData, ImageError> {
+
+        let open = Instant::now();
+        let file = match File::open(&fqp) {
+            Ok(f) => f,
+            Err(_e) => { return Err(ImageError::ErrorOpeningImageFile(id)); }
+        };
+        let open = open.elapsed();
+
+        tokio::task::yield_now().await;
+
+
+        let read = Instant::now();
+
+        let mut bufreader = std::io::BufReader::new(&file);
+
+        let exifreader = ExifReader::new();
+
+        let exif = match exifreader.read_from_container(&mut bufreader) {
+            Ok(exif) => { Some(exif) },
+            Err(_)   => { None }
+        };
+
+        match bufreader.seek(SeekFrom::Start(0)) {
+            Ok(_)   => { },
+            Err(_e) => { return Err(ImageError::ErrorReadingImageFile(id)); }
+        }
+
+        let read = read.elapsed();
+
+
+        tokio::task::yield_now().await;
+
+        let decode = Instant::now();
+        let Ok(reader) = ImageReader::new(bufreader).with_guessed_format() else {
+            return Err(ImageError::ErrorGuessingFormat(id));
+        };
+
+        let image = match reader.decode() {
+            Ok(i) => i,
+            Err(_e) => {
+                return Err(ImageError::ErrorDecodingImage(id));
+            }
+        };
+        let decode = decode.elapsed();
+
+        tokio::task::yield_now().await;
+
+        let width   = image.width();
+        let height  = image.height();
+        let data    = image.to_rgba8().into_raw();
+        let handle  = ImageHandle::from_rgba(width, height, data);
+
+        let r = LoadData {
+            id,
+            handle: Some(handle),
+            open,
+            read,
+            decode,
+            dimensions:Size::new(width,height),
+            exif
+        };
+
+        Ok( r )
+    }
 
 }
 
@@ -196,7 +274,6 @@ impl FileSystemHelper {
         sipper(async move |mut progress| {
 
             use globset::{GlobMatcher,GlobBuilder};
-            // let mut builder = GlobSetBuilder::new();
 
             let mut items:FsiVec = VecDeque::new();
 
@@ -210,7 +287,6 @@ impl FileSystemHelper {
                 if dir.contains(['*','?','[']) {
                     let mut pb_root  = PathBuf::new();
                     let mut pb_match = PathBuf::new();
-
                     let mut got_root = false;
 
                     for c in path.components() {
@@ -232,16 +308,14 @@ impl FileSystemHelper {
 
                     let glob = match GlobBuilder::new(pb_match.to_str().unwrap()).case_insensitive(true).build() { Ok(g) => g, Err(_) => continue }.compile_matcher();
 
-                    dirs.push( (pb_root,Some(glob) ) );
+                    dirs.push( (pb_root, Some(glob) ) );
                 }
 
                 if path.is_dir() {
                     dirs.push( (dir.into(),None) );
                 }
-
-
                 else if path.is_file() {
-                    match FileSystemImage::from_cl(path.to_path_buf() ) {
+                    match FileSystemImage::from_cl("cl",path.to_path_buf() ) {
                         Ok(mut i) => {
                                 let y = path.as_path();
 
@@ -322,7 +396,7 @@ impl FileSystemHelper {
                             Err(_) => (0,std::time::SystemTime::now())
                         };
 
-                        match FileSystemImage::from_origin(&path, entry.path().to_path_buf() ) {
+                        match FileSystemImage::from_origin("sip",&path, entry.path().to_path_buf() ) {
                             Ok(mut i) => {
 
                                 i.size = size;
@@ -352,73 +426,6 @@ impl FileSystemHelper {
 
             Ok(())
         })
-    }
-
-    pub async fn load_image(fqp:PathBuf,id:NonZeroUsize)
-        -> Result<LoadData, ImageError> {
-
-        let open = Instant::now();
-        let file = match File::open(&fqp) {
-            Ok(f) => f,
-            Err(_e) => { return Err(ImageError::ErrorOpeningImageFile(id)); }
-        };
-        let open = open.elapsed();
-
-        tokio::task::yield_now().await;
-
-
-        let read = Instant::now();
-
-        let mut bufreader = std::io::BufReader::new(&file);
-
-        let exifreader = ExifReader::new();
-
-        let exif = match exifreader.read_from_container(&mut bufreader) {
-            Ok(exif) => { Some(exif) },
-            Err(_)   => { None }
-        };
-
-        match bufreader.seek(SeekFrom::Start(0)) {
-            Ok(_)   => { },
-            Err(_e) => { return Err(ImageError::ErrorReadingImageFile(id)); }
-        }
-
-        let read = read.elapsed();
-
-
-        tokio::task::yield_now().await;
-
-        let decode = Instant::now();
-        let Ok(reader) = ImageReader::new(bufreader).with_guessed_format() else {
-            return Err(ImageError::ErrorGuessingFormat(id));
-        };
-
-        let image = match reader.decode() {
-            Ok(i) => i,
-            Err(_e) => {
-                return Err(ImageError::ErrorDecodingImage(id));
-            }
-        };
-        let decode = decode.elapsed();
-
-        tokio::task::yield_now().await;
-
-        let width   = image.width();
-        let height  = image.height();
-        let data    = image.to_rgba8().into_raw();
-        let handle  = ImageHandle::from_rgba(width, height, data);
-
-        let r = LoadData {
-            id,
-            handle: Some(handle),
-            open,
-            read,
-            decode,
-            dimensions:Size::new(width,height),
-            exif
-        };
-
-        Ok( r )
     }
 
 }

@@ -34,8 +34,9 @@ use image::{
 };
 
 use iced::task::Handle as TaskHandle;
-
 use std::path::PathBuf;
+
+
 
 #[derive(Debug, Clone)]
 enum Msg {
@@ -87,7 +88,7 @@ impl App {
 
         Self {
             qv:                     QuickViewer::new(config),
-            fullscreen:             false,
+            fullscreen:             args.fullscreen,
             current_scan_dir:       "".into(),
             scan_dir_task:          None,
 

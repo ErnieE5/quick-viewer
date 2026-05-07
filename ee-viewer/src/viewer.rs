@@ -251,7 +251,6 @@ pub struct QuickViewer {
     slide_mode:                 SlideMode,
 
     empty_image:                ImageHandle,
-
 }
 
 
