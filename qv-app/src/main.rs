@@ -6,7 +6,7 @@ use ee_viewer::{QuickViewer,QVConfig,QVMsg,RenderMode,ScanProgress,FileSystemHel
 
 mod args;
 
-const MIN_DELAY: u64 = 5;
+const MIN_DELAY: u64 = 1;
 
 use crate::args::{Args};
 

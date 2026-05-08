@@ -4,7 +4,8 @@ mod viewer;
 mod img_traits;
 mod file_traits;
 
-mod file_provider;
+mod file_system_image;
+mod file_system_helper;
 
 mod img_list;
 
@@ -21,6 +22,6 @@ pub use img_traits::{
     ScanProgress,
 };
 
-pub use file_provider::{
+pub use file_system_helper::{
     FileSystemHelper
 };

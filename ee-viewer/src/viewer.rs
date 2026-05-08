@@ -10,7 +10,7 @@ use crate::toast::{self,Toast};
 
 use crate::img_traits::{ImageError,ImageDyn};
 use crate::file_traits::{LoadData};
-use crate::file_provider::{FileSystemHelper};
+use crate::file_system_helper::{FileSystemHelper};
 
 use crate::img_list::{ImageList};
 
