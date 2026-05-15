@@ -9,7 +9,7 @@ use std::cmp::Ordering;
 
 use crate::img_traits::{ ImageDyn, ImageError, };
 
-type ImageKey = NonZeroUsize;
+pub type ImageKey = NonZeroUsize;
 
 
 #[derive(Debug,Clone)]

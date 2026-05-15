@@ -76,7 +76,7 @@ use std::num::NonZeroUsize as ImageKey;
 use iced::advanced::image::Allocation as ImageAllocation;
 use iced::advanced::image::Error      as AllocError;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SlideMode {
     Forward,
     Reverse,
@@ -137,6 +137,7 @@ pub enum QVMsg {
     Home,
     End,
     Clip(String),
+    ClipFqp(ImageKey),
     #[allow(unused)]
     ClipResult(Result<(), std::fmt::Error>),
     ByeToaster(usize),
@@ -344,20 +345,18 @@ impl QuickViewer {
             None => false,
             Some(ImageCacheItem::Handle(h)) => {
                 if Some(h) != self.current_image_handle.as_ref() {
-                    self.current_image_handle = Some(h.clone());
-                    self.show_when_loaded = None;
+                    self.current_image_handle   = Some(h.clone());
+                    self.show_when_loaded       = None;
                 }
                 true
             },
-            Some(ImageCacheItem::Alloc(a,d)) => {
-                cprintln!("~[c45]{d:?}");
+            Some(ImageCacheItem::Alloc(a,_d)) => {
                 if Some(a.handle()) != self.current_image_handle.as_ref() {
-                    self.current_image_handle = Some(a.handle().clone());
-                    self.show_when_loaded = None;
+                    self.current_image_handle   = Some(a.handle().clone());
+                    self.show_when_loaded       = None;
                 }
                 true
             }
-
         }
     }
 
@@ -366,16 +365,15 @@ impl QuickViewer {
 
         let key = match self.img_list.key_at(index) {
             Ok(k)   => k,
-            Err(e)  => { cprintln!("~[c196]{e:?} ~[c255]{index}"); todo!()}
+            Err(e)  => { cprintln!("~[c196]{e:?} ~[c255]{index}"); return Task::none(); }
         };
 
         match self.img_list.goto(index) {
             Ok(i)   => { assert_eq!(index,i); },
-            Err(e)  => { cprintln!("~[c196]{e:?} ~[c255]{index}"); todo!()}
+            Err(e)  => { cprintln!("~[c196]{e:?} ~[c255]{index}"); return Task::none(); }
         };
 
         if !self.showit() {
-            // cprintln!("Zzzzzz ~[c255]{key} ~[c51]{:?}",self.now-self.start);
             self.show_when_loaded = Some(key);
         }
 
@@ -392,15 +390,11 @@ impl QuickViewer {
         // anticipation that we will want it soon.
         let mut add_to_batch = |key| {
             if self.image_cache.get(&key).is_none() {
-                match self.pending_image_requests.get(&key) {
-                    None => {
-                        match self.pending_image_requests.insert(key,CacheData::new(key)) {
-                            None => { m.push(Task::done(QVMsg::RequestAnImage(key))); }
-                            Some(_) => { panic!(); }
-                        }
-                    },
-                    Some(_) => { }
-
+                if !self.pending_image_requests.contains_key(&key) {
+                    match self.pending_image_requests.insert(key,CacheData::new(key)) {
+                        None => { m.push(Task::done(QVMsg::RequestAnImage(key))); }
+                        Some(_) => { panic!(); }
+                    }
                 }
             }
 
@@ -467,13 +461,18 @@ impl QuickViewer {
 
     pub fn update(&mut self, event: QVMsg, now: Instant) -> Task<QVMsg> {
         self.now = now;
-        // cprintln!("~[c7]{:?}    {:40.40}",now-self.start,format!("{:?}",event) );
+        // cprintln!("~[c7]{:10.4?}    {:80.80}",now-self.start,format!("{:?}",event) );
         match event {
-            QVMsg::Welcome  =>    { Task::none() }
-            // QVMsg::Noop     =>    { Task::none() },
+            QVMsg::Welcome          =>    { Task::none() }
 
-            QVMsg::Clip(s)            => { clipboard::write(s) },
-            QVMsg::ClipResult(_)  => { Task::none() },
+            QVMsg::ClipFqp(key)     => {
+                match self.img_list.item_from_key(key) {
+                    Ok(i)  => clipboard::write( i.fqp().display().to_string() ),
+                    Err(_) => { return Task::none(); }
+                }
+            },
+            QVMsg::Clip(s)          => { clipboard::write(s) },
+            QVMsg::ClipResult(_)    => { Task::none() },
             // QVMsg::ClipResult(Ok(_))  => { Task::none() },
             // QVMsg::ClipResult(Err(e)) => { cprintln!("{e:?}"); Task::none() },
 
@@ -565,6 +564,7 @@ impl QuickViewer {
                 // cprintln!("RAI ~[c61]{:x}",key);
 
                 let Some(r) = self.pending_image_requests.get_mut(&key) else {
+                    cprintln!("RAI ~[c196]{:x}",key);
                     return Task::none();
                 };
 
@@ -690,10 +690,7 @@ impl QuickViewer {
 
                     self.img_list.append(list);
 
-                    let next_image = match self.img_list.first() {
-                        Ok(i) => i,
-                        Err(_) => { panic!(); }
-                    };
+                    let next_image = self.img_list.first().expect("at least one new item appended to list");
 
                     self.goto_image_task( next_image )
                 }
@@ -745,12 +742,12 @@ impl QuickViewer {
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 } else {
-                    let idx = match self.img_list.random() {
-                        Ok(i) => i,
-                        Err(_) => { panic!(); }
+                    let next_image = match self.img_list.random() {
+                        Ok(i)   => i,
+                        Err(_)  => { return Task::none(); }
                     };
                     self.pending_image_requests.drain();
-                    self.goto_image_task( idx )
+                    self.goto_image_task( next_image )
                 }
             }
 
@@ -760,7 +757,10 @@ impl QuickViewer {
                 }
                 else
                 {
-                    let idx = self.img_list.peek_range(-100..=-100).next().expect("1");
+                    let idx = match self.img_list.peek_range(-100..=-100).next() {
+                        Some(i) => i,
+                        None    => { return Task::none(); }
+                    };
 
                     self.pending_image_requests.drain();
                     self.goto_image_task(idx)
@@ -773,7 +773,10 @@ impl QuickViewer {
                 }
                 else
                 {
-                    let idx = self.img_list.peek_range(100..=100).next().expect("1");
+                    let idx = match self.img_list.peek_range(100..=100).next() {
+                        Some(i) => i,
+                        None    => { return Task::none(); }
+                    };
 
                     self.pending_image_requests.drain();
                     self.goto_image_task(idx)
@@ -783,7 +786,7 @@ impl QuickViewer {
             QVMsg::Home => {
                 let next_image = match self.img_list.first() {
                     Ok(i) => i,
-                    Err(_) => { panic!(); }
+                    Err(_) => { return Task::none(); }
                 };
 
                 self.pending_image_requests.drain();
@@ -793,7 +796,7 @@ impl QuickViewer {
             QVMsg::End => {
                 let next_image = match self.img_list.last() {
                     Ok(i) => i,
-                    Err(_) => { panic!(); }
+                    Err(_) => { return Task::none(); }
                 };
 
                 self.pending_image_requests.drain();
@@ -821,7 +824,11 @@ impl QuickViewer {
                 else
                 {
                     let delta:isize = -y as isize;
-                    let idx   = self.img_list.peek_range(delta..=delta).next().expect("1");
+
+                    let Some(idx) = self.img_list.peek_range(delta..=delta).next() else {
+                        return Task::none();
+                    };
+
                     self.pending_image_requests.drain();
                     self.goto_image_task(idx)
                 }
@@ -840,31 +847,34 @@ impl QuickViewer {
             }
 
             QVMsg::Slide(_tick) => {
-                if self.img_list.is_empty() { return Task::none(); }
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 } else {
-                    let next_idx = match self.slide_mode {
-                        SlideMode::Forward => { self.img_list.peek_range( 1..= 1).next().expect("") },
-                        SlideMode::Reverse => { self.img_list.peek_range(-1..=-1).next().expect("") },
+                    let Some(next_idx) = (match self.slide_mode {
+                        SlideMode::Forward => { self.img_list.peek_range( 1..= 1).next() },
+                        SlideMode::Reverse => { self.img_list.peek_range(-1..=-1).next() },
                         SlideMode::Random  => {
                             self.pending_image_requests.drain();
-                            self.img_list.random().expect("")
+                            match self.img_list.random() {
+                                Ok(i) => Some(i),
+                                Err(_) => { return Task::none(); }
+                            }
                         },
+                    })
+                    else {
+                        return Task::none();
                     };
 
-                    if self.config.time_forward_loop {
-                        if next_idx == ImageKey::new(1).expect("reality")
+                    if self.config.time_forward_loop && self.slide_mode == SlideMode::Forward {
+
+                        if next_idx == ImageKey::MIN
                         {
-                            if !self.toasts.is_empty() {
-                                self.toasts[0].message = format!("{:?}",now-self.loop_start);
-                            }
                             cprintln!("{:?}",now-self.loop_start);
                             self.loop_start = Instant::now();
+                            self.config.time_forward_loop = false;
                             return iced::exit();
                         }
                     }
-
 
                     self.goto_image_task(next_idx)
                 }
@@ -933,6 +943,9 @@ impl QuickViewer {
 
 
     pub fn view(&self) -> Element<'_, QVMsg> {
+
+        let view_start = Instant::now();
+
         let c = match self.img_list.the_index() {
             Ok(i) => i.get(),
             Err(_) => 0
@@ -943,17 +956,17 @@ impl QuickViewer {
             Err(_) => 0
         };
 
-        let (group,fname) = match self.img_list.item() {
-            Ok(n)   => (n.group(),n.name()),
-            Err(_)  => ("".into(),"".into())
-        };
-        let fqp = match self.img_list.item() {
-            Ok(n)   => n.fqp().display().to_string(),
-            Err(_)  => "".into()
+        let (_origin,group,fname) = match self.img_list.item() {
+            Ok(n)   => (n.origin(),n.group(),n.name()),
+            Err(_)  => ("".into(),"".into(),"".into())
         };
 
-        let file_name =
-                container(
+        let key = match self.img_list.key() {
+            Ok(k) => k,
+            Err(_) => ImageKey::MIN
+        };
+
+        let prefix = if group.len() > 0 {
                     row![
                         text(group)
                             .size(self.config.font_size)
@@ -961,7 +974,19 @@ impl QuickViewer {
                             .wrapping(Wrapping::None),
                         text("/")
                             .color(color!(0xffffff))
-                            .size(self.config.font_size),
+                            .size(self.config.font_size)
+                    ]
+        }
+        else
+        {
+            row![]
+        };
+
+
+        let file_name =
+                container(
+                    row![
+                        prefix,
                         text(fname)
                             .size(self.config.font_size)
                             .color(color!(0xFDFD96))
@@ -973,9 +998,9 @@ impl QuickViewer {
                 container(
                     row![
                         button( text("fqp").size(max(self.config.font_size,10)).color(color!(0x000000)) )
-                            .padding([0,5]).height(iced::Length::Fill).on_press(QVMsg::Clip(fqp)),
+                            .padding([0,5]).height(iced::Length::Fill).on_press(QVMsg::ClipFqp(key)),
                         button( text("fn").size(max(self.config.font_size,10)).color(color!(0x000000)) )
-                            .padding([0,5]).height(iced::Length::Fill).on_press(QVMsg::Clip(fname.into()))
+                            .padding([0,5]).height(iced::Length::Fill).on_press(QVMsg::Clip(fname.to_string()))
                     ].spacing(5)
                 );
 
@@ -989,14 +1014,15 @@ impl QuickViewer {
 
         let image_size = text(image_size).size(self.config.font_size).color(color!(0xa368a8)).font(Font::MONOSPACE);
 
-        let image_dim = match self.img_list.key() {
-            Ok(key) => {
+        let image_dim = match key {
+            ImageKey::MIN =>          format!("{0:>6}***{0:>6}",""),
+            key => {
                 match self.loaded_image_info.get(&key) {
                     Some(i) =>  format!("{: >6} x {: <6}",num(i.dimensions.width),num(i.dimensions.height)),
                     None    =>  format!("{0:>6}!!!{0:>6}","")
                 }
             },
-            Err(_)  =>          format!("{0:>6}***{0:>6}","")
+
         };
 
         let image_dim = text(image_dim)
@@ -1239,14 +1265,21 @@ impl QuickViewer {
         };
 
 
-        mouse_area(
+        let ret = mouse_area(
             center(stuff).width(Fill).height(Fill)
         )
         .on_press(QVMsg::Left)
         .on_right_press(QVMsg::Right)
         .on_middle_press(QVMsg::Swap)
         .on_scroll(|delta| { QVMsg::Scrolled(delta) } )
-        .into()
+        .into();
+
+        let view_elapsed = view_start.elapsed();
+        if view_elapsed > Duration::from_micros(500) {
+            ee_conio::cprintln!("~[C196 c227]{:>10.3?}  view time warning~[XK]",view_elapsed);
+        }
+
+        ret
     }
 
     pub fn subscription(&self) -> Subscription<QVMsg> {

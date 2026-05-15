@@ -1,8 +1,6 @@
 // #![allow(unused_imports)]
 use ee_conio::{cprintln};
-use ee_viewer::{QuickViewer,QVConfig,QVMsg,RenderMode,ScanProgress,FileSystemHelper};
-
-
+use ee_viewer::{QuickViewer,QVConfig,QVMsg,RenderMode,SipProgress,FileSystemHelper,ImageKey};
 
 mod args;
 
@@ -46,9 +44,12 @@ enum Msg {
     WindowEvent( (Id,Event) ),
     FullScreenToggle,
 
+    GetImageHandle(ImageKey,QVMsg),
+    GetImageAlloc(ImageKey,QVMsg),
+
     FileDropped(PathBuf),
     FindFilesOnPath,
-    FindFilesProgress(ScanProgress),
+    FindFilesProgress(SipProgress),
     FileFindComplete ,
     CancelFileFind,
 
@@ -63,7 +64,7 @@ struct App {
     args:                       Args,
     fullscreen:                 bool,
     qv:                         QuickViewer,
-    scan_dir_task:              Option<TaskHandle>,
+    sip_dir_task:               Option<TaskHandle>,
     current_scan_dir:           String,
 }
 
@@ -90,7 +91,7 @@ impl App {
             qv:                     QuickViewer::new(config),
             fullscreen:             args.fullscreen,
             current_scan_dir:       "".into(),
-            scan_dir_task:          None,
+            sip_dir_task:           None,
 
             args
         }
@@ -137,7 +138,7 @@ impl App {
                     | _e | { Msg::FileFindComplete }
                 ).abortable();
 
-                self.scan_dir_task = Some(h);
+                self.sip_dir_task = Some(h);
 
                 m
             }
@@ -146,37 +147,34 @@ impl App {
             Msg::FullScreenToggle => {
                 use iced::window::{self,Mode};
 
-                let mode = if self.fullscreen  {
-                    self.fullscreen = false; Mode::Windowed
+                self.fullscreen=!self.fullscreen;
 
-                } else {
-                    self.fullscreen = true;  Mode::Fullscreen
-                };
+                let mode = if self.fullscreen { Mode::Fullscreen } else { Mode::Windowed };
 
-                window::latest().and_then(move |id| window::set_mode(id, mode))
+                window::latest().and_then(move |id| window::set_mode(id, mode) )
             }
 
             Msg::FindFilesProgress(p) => {
 
                 let list = match p {
-                    ScanProgress::CurrentDir(d) => { self.current_scan_dir=d; return Task::none(); }
-                    ScanProgress::SomeFiles(l)  => l,
+                    SipProgress::CurrentDir(d) => { self.current_scan_dir=d; return Task::none(); }
+                    SipProgress::SomeFiles(l)  => l,
                 };
 
                 self.qv.update( QVMsg::AddFiles(list), now ).map(Msg::Qv)
             },
 
             Msg::FileFindComplete => {
-                self.scan_dir_task = None;
+                self.sip_dir_task = None;
                 self.qv.update( QVMsg::UpdateCache, now ).map(Msg::Qv)
             },
 
             Msg::CancelFileFind => {
-                match &self.scan_dir_task {
+                match &self.sip_dir_task {
                     None => { },
                     Some(h) => {
                         h.abort();
-                        self.scan_dir_task = None;
+                        self.sip_dir_task = None;
                     }
                 }
                 self.qv.update( QVMsg::UpdateCache, now ).map(Msg::Qv)
@@ -190,7 +188,7 @@ impl App {
                     | _e | { Msg::FileFindComplete }
                 ).abortable();
 
-                self.scan_dir_task = Some(h);
+                self.sip_dir_task = Some(h);
 
                 m
             },
@@ -207,6 +205,10 @@ impl App {
                 Task::batch(m)
             },
 
+            Msg::GetImageHandle(_key,_msg) => { Task::none() },
+            Msg::GetImageAlloc(_key,_msg) => { Task::none() },
+
+
             Msg::Goodbye  => {
                 iced::exit()
             },
@@ -215,7 +217,7 @@ impl App {
 
     fn view(&self) -> Element<'_, Msg> {
 
-        // let scan_dir_progress = if self.scan_dir_task.is_some() {
+        // let scan_dir_progress = if self.sip_dir_task.is_some() {
         //     container(
         //         container(
         //             row![

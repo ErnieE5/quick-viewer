@@ -8,7 +8,7 @@ use std::fmt::{self,Debug};
 
 // pub trait FileProvider
 // {
-// pub fn find_files_sipper(args: Vec<String>,max_depth:usize) -> impl Straw<(), ScanProgress, ImageError>
+// pub fn find_files_sipper(args: Vec<String>,max_depth:usize) -> impl Straw<(), SipProgress, ImageError>
 //     fn sip_them(args: Vec<String>,max_depth:usize) ->
 // }
 
@@ -29,12 +29,12 @@ pub struct LoadData {
 impl Debug for LoadData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LoadData")
-            .field("id", &self.id)
-            .field("handle", if self.handle.is_some() { &true } else { &false } )
-            .field("open", &self.open)
-            .field("read", &self.read)
-            .field("decode", &self.decode)
-            .field("dimensions", &self.dimensions)
+            .field("id", &format_args!("{:x}",&self.id) )
+            .field("h", if self.handle.is_some() { &true } else { &false } )
+            .field("o", &self.open)
+            .field("r", &self.read)
+            .field("d", &self.decode)
+            .field("dim", &self.dimensions)
             .field("exif", if self.exif.is_some() { &true } else { &false })
 
         .finish()

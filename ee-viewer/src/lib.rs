@@ -19,7 +19,11 @@ pub use viewer::{
 };
 
 pub use img_traits::{
-    ScanProgress,
+    SipProgress,
+};
+
+pub use img_list::{
+    ImageKey,
 };
 
 pub use file_system_helper::{

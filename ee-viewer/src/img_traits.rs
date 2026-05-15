@@ -20,7 +20,7 @@ pub enum ImageError
 
 
 #[derive(Clone,Debug)]
-pub enum ScanProgress {
+pub enum SipProgress {
     SomeFiles(Vec<Box<dyn ImageDyn>>),
     CurrentDir(String),
 }

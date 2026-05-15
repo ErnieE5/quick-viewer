@@ -7,7 +7,7 @@ use crate::img_traits::ImageError;
 // use std::fmt::{Display,Formatter};
 use std::num::NonZeroUsize;
 
-use crate::img_traits::{  ImageDyn, ScanProgress };
+use crate::img_traits::{  ImageDyn, SipProgress };
 use crate::file_system_image::{FileSystemImage};
 use crate::file_traits::{ LoadData };
 
@@ -114,28 +114,25 @@ impl FileSystemHelper {
 
 type FsiVec = VecDeque<FileSystemImage>;
 
-fn drain(items:& mut FsiVec) -> ScanProgress {
+fn drain(items:& mut FsiVec) -> SipProgress {
     let mut files = Vec::<Box<dyn ImageDyn>>::new();
 
-    'r: loop {
-        match items.pop_front() {
-            Some(i) => { files.push(Box::new(i)); }
-            None    => { break 'r; }
-        }
+    for i in items.drain(0..) {
+        files.push( Box::new(i) );
     }
 
-    ScanProgress::SomeFiles(files)
+    SipProgress::SomeFiles(files)
 }
 
 
 impl FileSystemHelper {
 
-    pub fn find_files_sipper(args: Vec<String>,max_depth:usize) -> impl Straw<(), ScanProgress, ImageError> {
+    pub fn find_files_sipper(args: Vec<String>,max_depth:usize) -> impl Straw<(), SipProgress, ImageError> {
         sipper(async move |mut progress| {
 
-            use globset::{GlobMatcher,GlobBuilder};
-
             let mut items:FsiVec = VecDeque::new();
+
+            use globset::{GlobMatcher,GlobBuilder};
 
             type DirGlob = Vec<(PathBuf,Option<GlobMatcher>)>;
 
@@ -175,31 +172,20 @@ impl FileSystemHelper {
                     dirs.push( ( dir.into(), None ) );
                 }
                 else if path.is_file() {
-                    match FileSystemImage::from_cl("cl",path.to_path_buf() ) {
-                        Ok(mut i) => {
-                                let y = path.as_path();
-
-                            let (size,ftime) = match y.metadata() {
-                                Ok(s) => (s.len(),s.created().unwrap()),
-                                Err(_) => (0,std::time::SystemTime::now())
-                            };
-
-                            i.size  = size;
-                            i.ftime = ftime.into();
-
-                            items.push_back( i )
-                        },
+                    match FileSystemImage::from_path("cl", path.as_path() ) {
+                        Ok(i)  => { items.push_back( i ) },
                         Err(e) => { ee_conio::cprintln!("{e:?}"); continue; }
                     }
                 }
             }
 
-            progress.send( drain(& mut items) ).await;
-
+            if !items.is_empty() {
+                progress.send( drain(& mut items) ).await;
+            }
 
 
             for dp in dirs {
-                progress.send( ScanProgress::CurrentDir(dp.0.display().to_string()) ).await;
+                progress.send( SipProgress::CurrentDir(dp.0.display().to_string()) ).await;
 
                 use walkdir::{ DirEntry };
 
@@ -236,7 +222,7 @@ impl FileSystemHelper {
                             Err(_) => entry.path().display().to_string()
                         };
 
-                        progress.send( ScanProgress::CurrentDir(stat) ).await;
+                        progress.send( SipProgress::CurrentDir(stat) ).await;
                         continue;
                     }
 
@@ -247,35 +233,25 @@ impl FileSystemHelper {
 
                     if !EXTENSIONS.contains( &ext ) {
                         tokio::task::yield_now().await;
+                        ee_conio::cprintln!("~[c227]doink ~[c7]{:?}",entry);
                         continue;
                     }
 
                     if entry.file_type().is_file() {
-                        let (size,ftime) = match entry.metadata() {
-                            Ok(s) => (s.len(),s.created().unwrap()),
-                            Err(_) => (0,std::time::SystemTime::now())
-                        };
-
-                        match FileSystemImage::from_origin("sip",&path, entry.path().to_path_buf() ) {
-                            Ok(mut i) => {
-
-                                i.size = size;
-                                i.ftime = ftime.into();
-
-                                items.push_back( i )
-                            },
-                            Err(_) => { continue; }
+                        match FileSystemImage::from_entry( "sip", &path, entry ) {
+                            Ok(i)   => { items.push_back( i ) },
+                            Err(_)  => { continue; }
                         }
                     }
 
-                    let drain_it = match sent {
+                    let drain_it_when = match sent {
                             0           => 0,
                             1..100      => 98,
                             100..10000  => 99,
                             10000..     => 999,
                     };
 
-                    if items.len() > drain_it {
+                    if items.len() > drain_it_when {
                         sent += items.len();
                         progress.send( drain(& mut items) ).await;
                     }
@@ -289,5 +265,3 @@ impl FileSystemHelper {
     }
 
 }
-
-
