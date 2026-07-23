@@ -24,7 +24,7 @@ cargo clippy --all-targets
 ```
 
 - **Debug builds are NOT fast to compile:** `Cargo.toml` forces `opt-level = 3` in the dev profile *and* for all dependencies (`[profile.dev.package."*"]`) because image decoding is unusably slow otherwise. Expect slow first builds.
-- **`heif` feature** (`cargo run --features heif`) pulls in `libheif-rs` and, in `main`, calls `libheif_rs::integration::image::register_all_decoding_hooks()` so the `image` crate can decode HEIC. Without it, `.heic` files (still in the scan `EXTENSIONS` list) fail to decode at load time.
+- **`heif` feature is ON by default** (`default=["heif"]` in `qv-app/Cargo.toml`). It pulls in `libheif-rs` and, in `main`, calls `libheif_rs::integration::image::register_all_decoding_hooks()` so the `image` crate can decode HEIC. It links the **native libheif** library — setup is machine-specific and recorded exactly in **`HEIF-BUILD.md`** (Windows/vcpkg verified; Linux/pkg-config unverified). Build with `--no-default-features` to omit it; `.heic` files (still in the scan `EXTENSIONS` list) then fail to decode at load time.
 - **iced version swap:** both member `Cargo.toml`s build against crates.io **iced 0.14** but carry commented-out `path = "../../iced"` lines for the local iced **0.15-dev** clone. To switch, comment/uncomment the paired `iced` + `iced_core` lines in *both* crates together.
 - Useful runtime flags (see `qv-app/src/args.rs`): `-F/--fs` fullscreen, `-S` slideshow, `--delay <ms>`, `--cache-size`, `--look-ahead`/`--look-behind`, `--no-canvas` (start in `Image` mode), `--view-exif`, `--ns/--no-splash`, `--max-depth`.
 
@@ -32,7 +32,7 @@ cargo clippy --all-targets
 
 Textbook Elm/iced app: state + `Message` enum + `update` + `view` + `subscription`, entered via `application::timed(...)` in `qv-app/src/main.rs`. **Two layers, each with its own message type:**
 
-- **`qv-app::App` (`main.rs`)** — the shell. Its `Msg` enum wraps viewer messages as `Msg::Qv(QVMsg)` and forwards via `self.qv.update(m, now).map(Msg::Qv)`. **All keyboard bindings live in `App::subscription`** (a big `keyboard::listen().filter_map` match), not in the viewer. Handles window events, fullscreen toggle (F11/`f`), and quit (Esc/`q`).
+- **`qv-app::App` (`main.rs`)** — the shell. Its `Msg` enum wraps viewer messages as `Msg::Qv(QVMsg)` and forwards via `self.qv.update(m, now).map(Msg::Qv)`. **All keyboard bindings live in the `const BINDINGS` table in `main.rs`** (`Chord`/`Binding`; chords match key + modifiers exactly, first match wins) — `App::subscription` just scans it; unmatched keys go to the debug-only `probe()`. Handles window events, fullscreen toggle (F11/`f`), and quit (Esc/`q`).
 - **`ee-viewer::QuickViewer` (`viewer.rs`)** — the viewer proper. Owns `QVConfig`, the `ImageList`, the LRU image cache, and pending-load bookkeeping. `App` constructs a `QVConfig` from CLI `Args`, then `QuickViewer::new(config)`.
 
 The public surface of `ee-viewer` is small — re-exports in `lib.rs`: `QuickViewer`, `QVConfig`, `QVMsg`, `RenderMode`, `SipProgress`, `ImageKey`, `FileSystemHelper`.

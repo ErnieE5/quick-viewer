@@ -6,7 +6,7 @@ edition = "2024"
 
 [features]
 default=["heif"]
-heif=["libheif-rs"]
+heif=["libheif-rs"]    # needs native libheif — see HEIF-BUILD.md; omit with --no-default-features
 
 
 [dependencies]
