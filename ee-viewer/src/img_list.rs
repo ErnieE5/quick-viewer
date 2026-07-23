@@ -11,6 +11,13 @@ use crate::img_traits::{ ImageDyn, ImageError, };
 
 pub type ImageKey = NonZeroUsize;
 
+//
+// Index normalization: every position in this module and its public API is a
+// 0-based usize into `list`. ImageKey (NonZeroUsize) is item IDENTITY only —
+// positions and keys never share a type. The ONLY place a 1-based number is
+// allowed to exist is display formatting ("current/total" does the +1 at the
+// point of printing, nowhere else).
+//
 
 #[derive(Debug,Clone)]
 pub struct ImageList {
@@ -21,8 +28,8 @@ pub struct ImageList {
 }
 
 pub struct PeekWalker {
-    pos:    NonZeroUsize,
-    total:  NonZeroUsize,
+    pos:    usize,      // 0-based, last yielded (pre-incremented in next())
+    len:    usize,
     count:  usize,
 }
 
@@ -31,7 +38,7 @@ impl Display for PeekWalker
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result
     {
         let p = self.pos;
-        let t = self.total;
+        let t = self.len;
         let c = self.count;
 
         f.write_fmt(format_args!("{p}/{t} remaining:{c}"))
@@ -39,110 +46,72 @@ impl Display for PeekWalker
 }
 
 
-impl PeekWalker {
-    fn new(pos:NonZeroUsize,total:NonZeroUsize,count:usize) -> PeekWalker {
-        PeekWalker { pos, total, count }
-    }
-}
-
-
 impl Iterator for PeekWalker {
-    type Item = NonZeroUsize;
+    type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.count > 0 {
-            if self.pos < self.total {
-                self.pos = self.pos.checked_add(1).expect("reality");
-            } else {
-                self.pos = NonZeroUsize::MIN;
-            }
-
-            self.count-=1;
-            Some(self.pos)
+        if self.count == 0 {
+            return None;
         }
-        else
-        {
-            None
-        }
+        self.count -= 1;
+        self.pos = (self.pos + 1) % self.len;
+        Some(self.pos)
     }
 }
 
 
 
 impl ImageList {
-    // #[allow(unused)]
-    // pub fn next(&mut self) {
-    //     if self.index < self.list.len() - 1 {
-    //         self.index += 1;
-    //     } else {
-    //         self.first();
-    //     }
-    // }
 
-    // #[allow(unused)]
-    // pub fn prev(&mut self) {
-    //     if self.index > 0 {
-    //         self.index -= 1;
-    //     } else {
-    //         self.last();
-    //     };
-    // }
-
-    pub fn to_external_index(&self) -> NonZeroUsize {
-        NonZeroUsize::new(self.list_index+1).expect("list index not negative")
+    /// Current position, 0-based.
+    pub fn pos(&self) -> Result<usize,ImageError>
+    {
+        match self.list.is_empty() {
+            true   => Err(ImageError::NoImages),
+            false  => Ok( self.list_index )
+        }
     }
 
-    pub fn first(&mut self) -> Result<NonZeroUsize,ImageError> {
+    pub fn len(&self) -> usize { self.list.len() }
+
+    pub fn is_empty(&self) -> bool { self.list.is_empty() }
+
+    pub fn first(&mut self) -> Result<usize,ImageError> {
         if self.list.is_empty() {
             return Err(ImageError::NoImages)
         }
         else
         {
             self.list_index = 0;
-            Ok( self.to_external_index() )
+            Ok( self.list_index )
         }
     }
 
-    pub fn last(&mut self) -> Result<NonZeroUsize,ImageError> {
+    pub fn last(&mut self) -> Result<usize,ImageError> {
         if self.list.is_empty() {
             return Err(ImageError::NoImages)
         }
         else
         {
             self.list_index = self.list.len()-1;
-            Ok( self.to_external_index() )
+            Ok( self.list_index )
         }
     }
 
-    pub fn the_index(&self) -> Result<NonZeroUsize,ImageError>
-    {
-        match self.list.is_empty() {
-            true   => Err(ImageError::NoImages),
-            false  => Ok( self.to_external_index() )
-        }
-    }
-
-    pub fn total_items(&self) -> Result<NonZeroUsize,ImageError>
-    {
-        match self.list.len() > 0 {
-            false => Err(ImageError::NoImages),
-            true  => Ok( NonZeroUsize::new(self.list.len()).expect("len is not zero") )
-        }
-    }
-
+    /// Positions relative to the current one, wrapping modularly at both
+    /// ends (circular). peek_range(-2..=2) yields the 5 positions centered
+    /// on the current image; offsets larger than the list wrap all the way
+    /// around ( (pos+offset) mod len ).
     pub fn peek_range<R>(&self,r: R) -> PeekWalker
     where
         R: RangeBounds<isize>
     {
-        // For the iterator to just signal None
-        let t = match self.total_items() {
-            Ok(i) => i,
-            Err(_) => {
-                let one = NonZeroUsize::MIN;
-                return PeekWalker::new( one, one, 0 );
-            }
-        };
+        let len = self.list.len();
 
+        // For the iterator to just signal None
+        if len == 0 {
+            return PeekWalker { pos:0, len:1, count:0 };
+        }
 
         let s = match r.start_bound() {
             Bound::Included(i)  => *i,
@@ -154,23 +123,13 @@ impl ImageList {
             Bound::Included(i) => { (i+1)-s },
             Bound::Excluded(e) => { e-s     },
             Bound::Unbounded   => 0,  // error
-        };
+        }.max(0) as usize;
 
-        let mut pos = (self.list_index as isize)+s;
+        // Start one step before the first yielded position; next() advances
+        // then yields, so the walker emits pos+s, pos+s+1, ... (mod len).
+        let start = (self.list_index as isize + s - 1).rem_euclid(len as isize) as usize;
 
-        if pos <= 0 {
-            pos = self.list.len() as isize + pos;
-        } else if pos > self.list.len() as isize {
-            pos = pos-(self.list.len() as isize);
-        }
-
-        if pos <= 0 {
-            pos=1;
-        }
-
-        let pos = NonZeroUsize::new(pos as usize).expect("pos is a positive non zero value");
-
-        PeekWalker::new( pos ,t, count.try_into().unwrap() )
+        PeekWalker { pos:start, len, count }
     }
 
 
@@ -181,20 +140,11 @@ impl ImageList {
         Ok( self.list[self.list_index] )
     }
 
-    pub fn key_at(&self, index:NonZeroUsize) -> Result<ImageKey,ImageError> {
+    pub fn key_at(&self, pos:usize) -> Result<ImageKey,ImageError> {
         if self.list.is_empty() {
             return Err(ImageError::NoImages);
         }
-
-        let internal = index.get()-1;
-
-        if internal <= self.list.len() {
-            Ok( self.list[internal] )
-        }
-        else
-        {
-            Err(ImageError::IndexOverflow)
-        }
+        self.list.get(pos).copied().ok_or(ImageError::IndexOverflow)
     }
 
 
@@ -226,19 +176,16 @@ impl ImageList {
 
 
     #[allow(unused)]
-    pub fn item_at(&self, index:NonZeroUsize) -> Result<&dyn ImageDyn,ImageError> {
+    pub fn item_at(&self, pos:usize) -> Result<&dyn ImageDyn,ImageError> {
 
         if self.list.is_empty() {
             return Err(ImageError::NoImages);
         }
 
-        let internal = index.get()-1;
-
-        if internal  > self.list.len() {
-            return Err(ImageError::IndexOverflow);
-        }
-
-        let key = self.list[internal];
+        let key = match self.list.get(pos) {
+            Some(k) => *k,
+            None    => { return Err(ImageError::IndexOverflow); }
+        };
 
         match self.store.get( &key ) {
             Some(s) => Ok( &**s ),
@@ -246,8 +193,6 @@ impl ImageList {
         }
     }
 
-
-    pub fn is_empty(&self) -> bool { self.list.is_empty() }
 
     pub fn append(& mut self,i:Vec<Box<dyn ImageDyn>>) {
         let init = self.list.is_empty();
@@ -262,34 +207,32 @@ impl ImageList {
         }
     }
 
-    pub fn goto(&mut self,idx:NonZeroUsize) -> Result<NonZeroUsize,ImageError> {
+    pub fn goto(&mut self,pos:usize) -> Result<usize,ImageError> {
         if self.list.is_empty() {
             return Err(ImageError::NoImages);
         }
 
-        let new_internal = idx.get()-1;
-
-        if new_internal > self.list.len() {
+        if pos >= self.list.len() {
             return Err(ImageError::IndexOverflow);
         }
 
-        self.list_index = new_internal;
+        self.list_index = pos;
 
-        Ok( self.to_external_index() )
+        Ok( self.list_index )
     }
 
-    pub fn random(&mut self) -> Result<NonZeroUsize,ImageError> {
+    pub fn random(&mut self) -> Result<usize,ImageError> {
         if self.list.is_empty() {
             return Err(ImageError::NoImages);
         }
         self.list_index = fastrand::usize(0..self.list.len());
-        Ok( self.to_external_index() )
+        Ok( self.list_index )
     }
 
-    pub fn find_index(&mut self,key:NonZeroUsize) -> Result<NonZeroUsize,ImageError> {
+    pub fn find_index(&self,key:ImageKey) -> Result<usize,ImageError> {
         match self.list.iter().position(|&i| i==key) {
-            Some(idx) => Ok( NonZeroUsize::new(idx+1).expect("index value must be non-negative") ),
-            None => { return Err(ImageError::InvalidItemKey); }
+            Some(idx) => Ok( idx ),
+            None => { Err(ImageError::InvalidItemKey) }
         }
     }
 
@@ -433,7 +376,7 @@ impl Display for ImageList
         else
         {
             let t = self.list.len();
-            let c = self.list_index+1;
+            let c = self.list_index+1;   // display is 1-based; the +1 lives at print time only
 
             let k = self.list[self.list_index];
             let s = match self.item() {
@@ -460,3 +403,116 @@ impl ImageList {
 
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::img_traits::ImageOrigin;
+
+    #[derive(Debug,Clone)]
+    struct TImg(String);
+
+    impl Display for TImg {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result { f.write_str(&self.0) }
+    }
+
+    impl ImageOrigin for TImg {
+        fn provider(&self) -> &str                { "test" }
+        fn origin(&self)   -> &str                { "" }
+        fn group(&self)    -> &str                { "" }
+        fn name(&self)     -> &str                { &self.0 }
+        fn display(&self)  -> String              { self.0.clone() }
+        fn fqp(&self)      -> std::path::PathBuf  { std::path::PathBuf::from(&self.0) }
+        fn size(&self)     -> u64                 { 0 }
+        fn ftime(&self)    -> time::UtcDateTime   { time::UtcDateTime::UNIX_EPOCH }
+    }
+
+    fn make(n:usize) -> ImageList {
+        let mut l = ImageList::new();
+        l.append( (0..n).map(|i| Box::new(TImg(format!("img{i:03}"))) as Box<dyn ImageDyn>).collect() );
+        l
+    }
+
+    #[test]
+    fn empty_list_errors_and_yields_nothing() {
+        let mut l = make(0);
+        assert!(l.pos().is_err());
+        assert!(l.first().is_err());
+        assert!(l.last().is_err());
+        assert!(l.key().is_err());
+        assert_eq!(l.peek_range(-5..=5).next(), None);
+    }
+
+    #[test]
+    fn goto_bounds_are_exclusive_of_len() {
+        let mut l = make(5);
+        assert!(l.goto(4).is_ok());
+        assert!(matches!(l.goto(5), Err(ImageError::IndexOverflow)));
+        assert!(l.key_at(4).is_ok());
+        assert!(matches!(l.key_at(5), Err(ImageError::IndexOverflow)));
+        assert!(l.item_at(4).is_ok());
+        assert!(matches!(l.item_at(5), Err(ImageError::IndexOverflow)));
+    }
+
+    #[test]
+    fn peek_steps_forward_and_back() {
+        let mut l = make(10);
+        l.goto(4).unwrap();
+        assert_eq!(l.peek_range( 1..= 1).collect::<Vec<_>>(), vec![5]);
+        assert_eq!(l.peek_range(-1..=-1).collect::<Vec<_>>(), vec![3]);
+    }
+
+    #[test]
+    fn peek_window_is_centered_and_wraps() {
+        let mut l = make(10);
+        l.goto(0).unwrap();
+        assert_eq!(l.peek_range(-2..=2).collect::<Vec<_>>(), vec![8,9,0,1,2]);
+        l.goto(9).unwrap();
+        assert_eq!(l.peek_range(-2..=2).collect::<Vec<_>>(), vec![7,8,9,0,1]);
+    }
+
+    #[test]
+    fn peek_wraps_at_both_ends() {
+        let mut l = make(5);
+        l.goto(0).unwrap();
+        assert_eq!(l.peek_range(-1..=-1).collect::<Vec<_>>(), vec![4]);
+        l.goto(4).unwrap();
+        assert_eq!(l.peek_range( 1..= 1).collect::<Vec<_>>(), vec![0]);
+    }
+
+    #[test]
+    fn peek_offsets_larger_than_len_are_modular() {
+        let mut l = make(5);
+        l.goto(2).unwrap();
+        // (2+100) mod 5 == 2, (2-100) mod 5 == 2
+        assert_eq!(l.peek_range( 100..= 100).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(l.peek_range(-100..=-100).collect::<Vec<_>>(), vec![2]);
+        // (2+101) mod 5 == 3, (2-101) mod 5 == 1
+        assert_eq!(l.peek_range( 101..= 101).collect::<Vec<_>>(), vec![3]);
+        assert_eq!(l.peek_range(-101..=-101).collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
+    fn sort_and_shuffle_preserve_current_key() {
+        let mut l = make(20);
+        l.goto(13).unwrap();
+        let key = l.key().unwrap();
+
+        l.shuffle().unwrap();
+        assert_eq!(l.key().unwrap(), key);
+
+        l.sort().unwrap();
+        assert_eq!(l.key().unwrap(), key);
+        assert_eq!(l.pos().unwrap(), 13);   // name sort restores append order
+    }
+
+    #[test]
+    fn find_index_round_trips_with_goto() {
+        let mut l = make(7);
+        let key = l.key_at(5).unwrap();
+        let pos = l.find_index(key).unwrap();
+        assert_eq!(pos, 5);
+        l.goto(pos).unwrap();
+        assert_eq!(l.key().unwrap(), key);
+    }
+}

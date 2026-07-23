@@ -360,17 +360,17 @@ impl QuickViewer {
         }
     }
 
-    fn goto_image_task(&mut self, index:ImageKey) -> Task<QVMsg> {
+    fn goto_image_task(&mut self, pos:usize) -> Task<QVMsg> {
         if self.img_list.is_empty() { return Task::none(); }
 
-        let key = match self.img_list.key_at(index) {
+        let key = match self.img_list.key_at(pos) {
             Ok(k)   => k,
-            Err(e)  => { cprintln!("~[c196]{e:?} ~[c255]{index}"); return Task::none(); }
+            Err(e)  => { cprintln!("~[c196]{e:?} ~[c255]{pos}"); return Task::none(); }
         };
 
-        match self.img_list.goto(index) {
-            Ok(i)   => { assert_eq!(index,i); },
-            Err(e)  => { cprintln!("~[c196]{e:?} ~[c255]{index}"); return Task::none(); }
+        match self.img_list.goto(pos) {
+            Ok(i)   => { assert_eq!(pos,i); },
+            Err(e)  => { cprintln!("~[c196]{e:?} ~[c255]{pos}"); return Task::none(); }
         };
 
         if !self.showit() {
@@ -867,7 +867,7 @@ impl QuickViewer {
 
                     if self.config.time_forward_loop && self.slide_mode == SlideMode::Forward {
 
-                        if next_idx == ImageKey::MIN
+                        if next_idx == 0
                         {
                             cprintln!("{:?}",now-self.loop_start);
                             self.loop_start = Instant::now();
@@ -946,15 +946,13 @@ impl QuickViewer {
 
         let view_start = Instant::now();
 
-        let c = match self.img_list.the_index() {
-            Ok(i) => i.get(),
+        // display is 1-based; this +1 is the only one allowed outside img_list
+        let c = match self.img_list.pos() {
+            Ok(i) => i+1,
             Err(_) => 0
         };
 
-        let t = match self.img_list.total_items() {
-            Ok(i) => i.get(),
-            Err(_) => 0
-        };
+        let t = self.img_list.len();
 
         let (_origin,group,fname) = match self.img_list.item() {
             Ok(n)   => (n.origin(),n.group(),n.name()),

@@ -43,8 +43,8 @@ The single source of truth for "what images exist and where we are."
 
 - Items stored in `HashMap<ImageKey, Box<dyn ImageDyn>>`; `list: Vec<ImageKey>` is the ordered/sorted/shuffled *view*; `list_index` is the current position.
 - **`ImageKey = NonZeroUsize`**, monotonically increasing, seeded at `0x10000EE5`. Keys are stable identity; list order changes under sort/shuffle without changing keys.
-- **Indexing is a persistent footgun:** external indices are **1-based `NonZeroUsize`**, internal are 0-based `usize`. `+1`/`-1` conversions are everywhere (`to_external_index`, `key_at`, `goto`, `item_at`). Sorts/shuffle preserve the *current* image by finding its key's new position afterward.
-- **`peek_range(r)`** returns a `PeekWalker` iterator that **wraps around both ends** (circular). This is how Left/Right and the preload window work; PageUp/PageDown are `peek_range(±100)`.
+- **Indexing is normalized:** every position is a **0-based `usize`**, in the public API and internally — there is no 1-based domain. Positions (`usize`) and keys (`ImageKey`/`NonZeroUsize`) are now distinct types, so the compiler catches mixing them. The **only** place `+1` may appear is display formatting ("current/total" in `view()` and `Display for ImageList`). Sorts/shuffle preserve the *current* image by finding its key's new position afterward. Unit tests in `img_list.rs` lock the math down — run `cargo test -p ee-viewer` after touching it.
+- **`peek_range(r)`** returns a `PeekWalker` iterator of 0-based positions that **wraps around both ends** (circular, true modular: `(pos+offset).rem_euclid(len)`). This is how Left/Right and the preload window work; PageUp/PageDown are `peek_range(±100)`.
 
 ### Loading, caching, preloading (in `viewer.rs`)
 
