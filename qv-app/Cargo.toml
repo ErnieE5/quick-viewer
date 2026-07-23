@@ -9,7 +9,7 @@ heif=["libheif-rs"]
 
 
 [dependencies]
-ee-conio = "0.1.0-alpha.2"
+ee-conio = "0.1.0-alpha.6"
 ee-viewer = { path="../ee-viewer", version="0.1.0" }
 clap = { version="4.6.1", features=["derive"] }
 image = "0.25.10"

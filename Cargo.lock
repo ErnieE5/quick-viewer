@@ -990,9 +990,9 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "ee-conio"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79003fcc505b96033d974921da1d65161afdaa5974648101a4fbbdedbe13239e"
+checksum = "5202950abcdb6f3b6bd71e815df09627b5301aa22964ed0297354595a42a3784"
 dependencies = [
  "ee-conio-engine",
  "ee-conio-macro",
@@ -1001,24 +1001,32 @@ dependencies = [
 
 [[package]]
 name = "ee-conio-engine"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2be4c7fe6590d74df1b84eaccf7be0a4d41adc2ac418978e1270b1424a51271b"
-dependencies = [
- "regex",
- "regex-macro",
-]
+checksum = "584d48e070c4a7a38484e49d1bc65418b9da212f060ffd1555d87f1618e39c7a"
 
 [[package]]
 name = "ee-conio-macro"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb79a4395355830b9e30ee3abd53632df10eccf5bb852485edf16a128ffb9f39"
+checksum = "544b3d83986984409988e1dcb5279174f5dcda434a02440810689ea3c98d2423"
 dependencies = [
  "ee-conio-engine",
+ "ee-conio-parse",
  "proc-macro2",
  "rustc-literal-escaper",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "ee-conio-parse"
+version = "0.1.0-alpha.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "887df2eb9ae33f180ce0e3400a6feb5c293f70e877ac06b6ee5874d75ad88ff5"
+dependencies = [
+ "ee-conio-engine",
+ "regex",
+ "regex-macro",
 ]
 
 [[package]]

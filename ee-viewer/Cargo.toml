@@ -16,7 +16,7 @@ libheif-rs = {version="2.7.0", features=["image"], optional=true }
 
 
 dyn-clone = "1.0.20"
-ee-conio = "0.1.0-alpha.2"
+ee-conio = "0.1.0-alpha.6"
 
 lru = "0.17.0"
 fastrand = "2.4.1"

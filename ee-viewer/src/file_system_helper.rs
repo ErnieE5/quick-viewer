@@ -233,7 +233,7 @@ impl FileSystemHelper {
 
                     if !EXTENSIONS.contains( &ext ) {
                         tokio::task::yield_now().await;
-                        ee_conio::cprintln!("~[c227]doink ~[c7]{:?}",entry);
+                        // ee_conio::cprintln!("~[c227]doink ~[c7]{:?}",entry);
                         continue;
                     }
 

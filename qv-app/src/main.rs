@@ -26,6 +26,10 @@ use iced::{
     Result as IcedResult
 };
 
+use iced::keyboard::{Key as KK, Modifiers, key::Named as KN};
+use iced::mouse::{ScrollDelta};
+use iced_core::keyboard::key::Physical as KP;
+
 use image::{
     self,
     ImageFormat
@@ -41,6 +45,7 @@ enum Msg {
 
     Welcome,
     Huh,
+    AltRightTest,       // TEST CODE: NamedMod chord exercise, prints "hi" — safe to remove
     WindowEvent( (Id,Event) ),
     FullScreenToggle,
 
@@ -57,6 +62,143 @@ enum Msg {
     Quit,
     Goodbye,
     Qv(QVMsg),
+}
+
+//
+// Keyboard/mouse binding table. Dispatch (App::subscription) and any help
+// display are both derived from this one list, so they can't drift apart.
+// Every chord is exact — a key event fires a binding only if it matches the
+// key AND the modifier set, so nothing dispatches by fall-through. First
+// match still wins, but shapes are disjoint enough that order is cosmetic.
+//
+#[derive(Debug)]
+enum Chord {
+    Named(KN),                          // named key + physical code; NO modifiers
+    NamedMod(KN, Modifiers),            // named key + exact modifier set
+    Text(&'static str),                 // text from a Character key; NONE or SHIFT only
+    Char(&'static str, Modifiers),      // Character key + exact modifier set
+    Mouse,                              // display only, never matches a key event
+}
+
+#[allow(dead_code)] // label/group/help are consumed by the help panel
+struct Binding {
+    chord:  Chord,
+    label:  &'static str,
+    group:  &'static str,
+    help:   &'static str,
+    msg:    Msg,
+}
+
+use Chord::{Named,NamedMod,Text,Char,Mouse};
+
+const BINDINGS: &[Binding] = &[
+    // Navigation
+    Binding{ chord:Named(KN::ArrowLeft),          label:"←",            group:"Navigation", help:"previous image",                     msg:Msg::Qv(QVMsg::Left)                    },
+    // TEST CODE: exercises the NamedMod chord shape — safe to remove
+    Binding{ chord:NamedMod(KN::ArrowRight,Modifiers::ALT),
+                                                  label:"Alt+→",        group:"Navigation", help:"test binding (prints hi)",           msg:Msg::AltRightTest                       },
+    Binding{ chord:Named(KN::ArrowRight),         label:"→",            group:"Navigation", help:"next image",                         msg:Msg::Qv(QVMsg::Right)                   },
+    Binding{ chord:Named(KN::PageUp),             label:"PgUp",         group:"Navigation", help:"jump back 100",                      msg:Msg::Qv(QVMsg::PageUp)                  },
+    Binding{ chord:Named(KN::PageDown),           label:"PgDn",         group:"Navigation", help:"jump forward 100",                   msg:Msg::Qv(QVMsg::PageDown)                },
+    Binding{ chord:Named(KN::Home),               label:"Home",         group:"Navigation", help:"first image",                        msg:Msg::Qv(QVMsg::Home)                    },
+    Binding{ chord:Named(KN::End),                label:"End",          group:"Navigation", help:"last image",                         msg:Msg::Qv(QVMsg::End)                     },
+    Binding{ chord:Text("r"),                     label:"r",            group:"Navigation", help:"random image",                       msg:Msg::Qv(QVMsg::RandomImage)             },
+
+    // Order
+    Binding{ chord:Text("s"),                     label:"s",            group:"Order",      help:"sort by name",                       msg:Msg::Qv(QVMsg::Sort)                    },
+    Binding{ chord:Text("S"),                     label:"S",            group:"Order",      help:"sort by file size",                  msg:Msg::Qv(QVMsg::SortSize)                },
+    Binding{ chord:Text("d"),                     label:"d",            group:"Order",      help:"sort by file date",                  msg:Msg::Qv(QVMsg::SortDate)                },
+    Binding{ chord:Text("h"),                     label:"h",            group:"Order",      help:"shuffle",                            msg:Msg::Qv(QVMsg::Shuffle)                 },
+
+    // Slideshow
+    Binding{ chord:Named(KN::Space),              label:"Space",        group:"Slideshow",  help:"toggle slideshow",                   msg:Msg::Qv(QVMsg::Space)                   },
+    Binding{ chord:Text("["),                     label:"[",            group:"Slideshow",  help:"less delay (faster)",                msg:Msg::Qv(QVMsg::DecDelay)                },
+    Binding{ chord:Text("]"),                     label:"]",            group:"Slideshow",  help:"more delay (slower)",                msg:Msg::Qv(QVMsg::IncDelay)                },
+    Binding{ chord:Char("s",Modifiers::ALT),      label:"Alt+S",        group:"Slideshow",  help:"cycle direction fwd/rev/random",     msg:Msg::Qv(QVMsg::SlideModeToggle)         },
+
+    // Display
+    Binding{ chord:Named(KN::F11),                label:"F11",          group:"Display",    help:"toggle fullscreen",                  msg:Msg::FullScreenToggle                   },
+    Binding{ chord:Text("f"),                     label:"f",            group:"Display",    help:"toggle fullscreen",                  msg:Msg::FullScreenToggle                   },
+    Binding{ chord:Char("e",Modifiers::ALT),      label:"Alt+E",        group:"Display",    help:"toggle EXIF panel",                  msg:Msg::Qv(QVMsg::ExifDisplayToggle)       },
+    Binding{ chord:Char("d",Modifiers::ALT),      label:"Alt+D",        group:"Display",    help:"toggle pending-load overlay",        msg:Msg::Qv(QVMsg::LookAheadDisplayToggle)  },
+    Binding{ chord:Char("-",Modifiers::CTRL),     label:"Ctrl+-",       group:"Display",    help:"smaller UI text",                    msg:Msg::Qv(QVMsg::FontDown)                },
+    Binding{ chord:Char("+",Modifiers::CTRL),     label:"Ctrl++",       group:"Display",    help:"larger UI text",                     msg:Msg::Qv(QVMsg::FontUp)                  },
+    Binding{ chord:Char("=",Modifiers::CTRL),     label:"Ctrl+=",       group:"Display",    help:"larger UI text",                     msg:Msg::Qv(QVMsg::FontUp)                  },
+
+    // App
+    Binding{ chord:Named(KN::Escape),             label:"Esc",          group:"App",        help:"quit",                               msg:Msg::Quit                               },
+    Binding{ chord:Text("q"),                     label:"q",            group:"App",        help:"quit",                               msg:Msg::Quit                               },
+    Binding{ chord:Text("?"),                     label:"?",            group:"App",        help:"dump args (debug)",                  msg:Msg::Huh                                },
+
+    // Mouse — display only; actual dispatch is the mouse_area in ee-viewer
+    Binding{ chord:Mouse,                         label:"left click",   group:"Mouse",      help:"previous image",                     msg:Msg::Qv(QVMsg::Left)                    },
+    Binding{ chord:Mouse,                         label:"right click",  group:"Mouse",      help:"next image",                         msg:Msg::Qv(QVMsg::Right)                   },
+    Binding{ chord:Mouse,                         label:"middle click", group:"Mouse",      help:"toggle zoom (Viewer mode)",          msg:Msg::Qv(QVMsg::Swap)                    },
+    Binding{ chord:Mouse,                         label:"scroll",       group:"Mouse",      help:"step images",                        msg:Msg::Qv(QVMsg::Scrolled(ScrollDelta::Lines{x:0.0,y:0.0})) },
+];
+
+impl Chord {
+    fn matches(&self, event: &keyboard::Event) -> bool {
+        use keyboard::Event as EV;
+
+        match (self,event) {
+            ( Named(n), EV::KeyPressed{ key:KK::Named(k), physical_key:KP::Code(_), modifiers, .. } )
+                => k == n && modifiers.is_empty(),
+
+            ( NamedMod(n,m), EV::KeyPressed{ key:KK::Named(k), physical_key:KP::Code(_), modifiers, .. } )
+                => k == n && modifiers == m,
+
+            ( Text(t), EV::KeyPressed{ key:KK::Character(_), text:Some(v), modifiers, .. } )
+                if *modifiers == Modifiers::SHIFT || *modifiers == Modifiers::NONE
+                => v.as_ref() == *t,
+
+            ( Char(c,m), EV::KeyPressed{ key:KK::Character(k), modifiers, text, .. } )
+                => modifiers == m
+                && k.as_ref() == *c
+                && ( *m != Modifiers::ALT || text.is_some() ),  // old ALT arm required text:Some(_)
+
+            _ => false,
+        }
+    }
+}
+
+// The exploratory cprintln! arms from the old subscription match — not real
+// bindings, just key discovery. Runs only when nothing in BINDINGS matched.
+fn probe(event: &keyboard::Event) -> Option<Msg> {
+    use keyboard::Event as EV;
+
+    match event {
+        EV::KeyPressed { text: Some(v), modifiers,.. }
+            if  *modifiers == Modifiers::SHIFT ||
+                *modifiers == Modifiers::NONE      => match v.as_ref() {
+            "A" => { cprintln!("A"); None },
+            "!" => { cprintln!("!"); None },
+            "1" => { cprintln!("{v} "); None },
+            // a  => { cprintln!("~[c197]{a}"); None }
+            _  => None,
+        },
+
+        EV::KeyPressed { key: KK::Character(key), modifiers: Modifiers::ALT, text:Some(_text),..} => match key.as_ref() {
+            "w" => {cprintln!("Alt W"); None },
+            "1" => {cprintln!("Alt 1"); None },
+            // a  => { cprintln!("~[c197]Alt {text}"); None }
+            _  => None,
+        },
+        EV::KeyPressed { key: KK::Character(key), modifiers: Modifiers::CTRL, ..} => match key.as_ref() {
+            "w" => {cprintln!("Ctrl w"); None },
+            // a  => { cprintln!("~[c197]Ctrl {key}"); None }
+            _  => None,
+        },
+        EV::KeyPressed { key: KK::Character(key), modifiers: Modifiers::SHIFT, ..} => match key.as_ref() {
+            "w" => {cprintln!("W {event:?}"); None },
+            "a" => {cprintln!("a {event:?}"); None },
+            "1" => {cprintln!("1 {event:?}"); None },
+            // a  => { cprintln!("4: {key:?}"); None }
+            _  => None,
+        },
+
+        _ => None,
+    }
 }
 
 #[derive(Debug)]
@@ -121,6 +263,11 @@ impl App {
             Msg::Welcome    => { Task::none() }
             Msg::Huh        => {
                 cprintln!("{:#?}",self.args);
+                Task::none()
+            }
+
+            Msg::AltRightTest => {     // TEST CODE — safe to remove
+                cprintln!("hi");
                 Task::none()
             }
 
@@ -262,86 +409,14 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Msg> {
-        use keyboard::Event         as EV;
-        use keyboard::Key           as KK;
-        use keyboard::key::Named    as KN;
-        use iced_core::keyboard::key::Physical as KP;
-
-        let qvh = |qvm| Some(Msg::Qv(qvm));
 
         let m = vec![
             self.qv.subscription().map(Msg::Qv),
 
-            keyboard::listen().filter_map(move |event|
-                match event {
-                    EV::KeyPressed { key: KK::Named(key), physical_key:KP::Code(_physical_key), ..} => match key {
-
-                        KN::ArrowLeft    => qvh(QVMsg::Left),
-                        KN::ArrowRight   => qvh(QVMsg::Right),
-                        KN::PageDown     => qvh(QVMsg::PageDown),
-                        KN::PageUp       => qvh(QVMsg::PageUp),
-                        KN::Space        => qvh(QVMsg::Space),
-                        KN::Home         => qvh(QVMsg::Home),
-                        KN::End          => qvh(QVMsg::End),
-                        KN::Escape       => Some(Msg::Quit),
-                        KN::F11          => Some(Msg::FullScreenToggle),
-                        // KN::Alt          => { cprintln!("{:?}",physical_key); None },
-                        // a  => { cprintln!("{:?}",physical_key); None }
-                        _ => None,
-                    },
-
-
-                    EV::KeyPressed { text: Some(ref v), modifiers,.. }
-                        if  modifiers == keyboard::Modifiers::SHIFT ||
-                            modifiers == keyboard::Modifiers::NONE      => match v.as_ref() {
-                        "A" => { cprintln!("A"); None },
-                        "!" => { cprintln!("!"); None },
-                        "1" => { cprintln!("{v} "); None },
-                        "f" => Some(Msg::FullScreenToggle),
-                        "q" => Some(Msg::Quit),
-                        "s" => qvh(QVMsg::Sort),
-                        "S" => qvh(QVMsg::SortSize),
-                        "d" => qvh(QVMsg::SortDate),
-                        "h" => qvh(QVMsg::Shuffle),
-                        "r" => qvh(QVMsg::RandomImage),
-                        "[" => qvh(QVMsg::DecDelay),
-                        "]" => qvh(QVMsg::IncDelay),
-                        "?" => Some(Msg::Huh),
-                        // a  => { cprintln!("~[c197]{a}"); None }
-                        _  => None,
-                    },
-
-                    EV::KeyPressed { key: KK::Character(ref key), modifiers: keyboard::Modifiers::ALT, text:Some(_text),..} => match key.as_ref() {
-                        "w" => {cprintln!("Alt W"); None },
-                        "1" => {cprintln!("Alt 1"); None },
-                        "d" => { qvh(QVMsg::LookAheadDisplayToggle) }
-                        "e" => { qvh(QVMsg::ExifDisplayToggle) }
-                        "s" => { qvh(QVMsg::SlideModeToggle) }
-                        // a  => { cprintln!("~[c197]Alt {text}"); None }
-                        _  => None,
-                    },
-                    EV::KeyPressed { key: KK::Character(ref key), modifiers: keyboard::Modifiers::CTRL, ..} => match key.as_ref() {
-                        "w" => {cprintln!("Ctrl w"); None },
-                        "-" => { qvh(QVMsg::FontDown) },
-                        "+" => { qvh(QVMsg::FontUp) },
-                        "=" => { qvh(QVMsg::FontUp) },
-                        // a  => { cprintln!("~[c197]Ctrl {key}"); None }
-                        _  => None,
-                    },
-                    EV::KeyPressed { key: KK::Character(ref key), modifiers: keyboard::Modifiers::SHIFT, ..} => match key.as_ref() {
-                        "w" => {cprintln!("W {event:?}"); None },
-                        "a" => {cprintln!("a {event:?}"); None },
-                        "1" => {cprintln!("1 {event:?}"); None },
-                        // a  => { cprintln!("4: {key:?}"); None }
-                        _  => None,
-                    },
-
-
-                    // EV::KeyPressed { key: KK::Character(ref key), ..} => match key.as_ref() {
-                    //      // a  => { cprintln!("4: {event:?}"); None }
-                    //      _  => None,
-                    // },
-                    _ => None,
+            keyboard::listen().filter_map( |event|
+                match BINDINGS.iter().find( |b| b.chord.matches(&event) ) {
+                    Some(b) => Some(b.msg.clone()),
+                    None    => probe(&event),
                 }
             ),
 
