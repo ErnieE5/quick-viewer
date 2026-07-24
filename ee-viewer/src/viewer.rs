@@ -1133,7 +1133,7 @@ impl QuickViewer {
                                     Tag(exif::Context::Tiff,50899)  |
                                     Tag(exif::Context::Tiff,59932)  |
                                     Tag(exif::Context::Exif,59932)  =>
-                                        (color!(0xff7f7f),format!("{}...",f.display_value().with_unit(f).to_string()[..40].to_string())),
+                                        (color!(0xff7f7f),format!("{}...",f.display_value().with_unit(f).to_string().chars().take(40).collect::<String>())),
 
                                     Tag::ImageDescription           =>
                                         (color!(0xFF8040),f.display_value().with_unit(f).to_string()),

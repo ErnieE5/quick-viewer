@@ -41,6 +41,7 @@ use std::path::PathBuf;
 
 
 #[derive(Debug, Clone)]
+#[rustfmt::skip]
 enum Msg {
 
     Welcome,
@@ -72,6 +73,7 @@ enum Msg {
 // match still wins, but shapes are disjoint enough that order is cosmetic.
 //
 #[derive(Debug)]
+#[rustfmt::skip]
 enum Chord {
     Named(KN),                          // named key + physical code; NO modifiers
     NamedMod(KN, Modifiers),            // named key + exact modifier set
@@ -81,6 +83,7 @@ enum Chord {
 }
 
 #[allow(dead_code)] // label/group/help are consumed by the help panel
+#[rustfmt::skip]
 struct Binding {
     chord:  Chord,
     label:  &'static str,
@@ -91,6 +94,7 @@ struct Binding {
 
 use Chord::{Named,NamedMod,Text,Char,Mouse};
 
+#[rustfmt::skip]    // THE table — column alignment is the whole point
 const BINDINGS: &[Binding] = &[
     // Navigation
     Binding{ chord:Named(KN::ArrowLeft),          label:"←",            group:"Navigation", help:"previous image",                     msg:Msg::Qv(QVMsg::Left)                    },
@@ -137,6 +141,7 @@ const BINDINGS: &[Binding] = &[
     Binding{ chord:Mouse,                         label:"scroll",       group:"Mouse",      help:"step images",                        msg:Msg::Qv(QVMsg::Scrolled(ScrollDelta::Lines{x:0.0,y:0.0})) },
 ];
 
+#[rustfmt::skip]
 impl Chord {
     fn matches(&self, event: &keyboard::Event) -> bool {
         use keyboard::Event as EV;
@@ -164,6 +169,7 @@ impl Chord {
 
 // The exploratory cprintln! arms from the old subscription match — not real
 // bindings, just key discovery. Runs only when nothing in BINDINGS matched.
+#[rustfmt::skip]
 fn probe(event: &keyboard::Event) -> Option<Msg> {
     use keyboard::Event as EV;
 
@@ -202,6 +208,7 @@ fn probe(event: &keyboard::Event) -> Option<Msg> {
 }
 
 #[derive(Debug)]
+#[rustfmt::skip]
 struct App {
     args:                       Args,
     fullscreen:                 bool,
@@ -210,6 +217,7 @@ struct App {
     current_scan_dir:           String,
 }
 
+#[rustfmt::skip]
 impl App {
     fn default() -> Self {
         let args = args::do_args();
