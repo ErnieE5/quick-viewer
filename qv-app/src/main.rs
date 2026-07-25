@@ -47,6 +47,7 @@ enum Msg {
     Welcome,
     Huh,
     AltRightTest,       // TEST CODE: NamedMod chord exercise, prints "hi" — safe to remove
+    ModifierStub(&'static str),     // stub for bare modifier presses — fill with real actions later
     WindowEvent( (Id,Event) ),
     FullScreenToggle,
 
@@ -134,6 +135,17 @@ const BINDINGS: &[Binding] = &[
     Binding{ chord:Text("q"),                     label:"q",            group:"App",        help:"quit",                               msg:Msg::Quit                               },
     Binding{ chord:Text("?"),                     label:"?",            group:"App",        help:"dump args (debug)",                  msg:Msg::Huh                                },
 
+    // Bare modifier presses — stubs, print only for now. NB: a modifier's own
+    // press event already carries its bit, so these need NamedMod, not Named.
+    Binding{ chord:NamedMod(KN::Shift,Modifiers::SHIFT),
+                                                  label:"Shift",        group:"Mods",       help:"stub (prints)",                      msg:Msg::ModifierStub("Shift")              },
+    Binding{ chord:NamedMod(KN::Control,Modifiers::CTRL),
+                                                  label:"Ctrl",         group:"Mods",       help:"stub (prints)",                      msg:Msg::ModifierStub("Ctrl")               },
+    Binding{ chord:NamedMod(KN::Alt,Modifiers::ALT),
+                                                  label:"Alt",          group:"Mods",       help:"stub (prints)",                      msg:Msg::ModifierStub("Alt")                },
+    Binding{ chord:NamedMod(KN::Super,Modifiers::LOGO),
+                                                  label:"Win",          group:"Mods",       help:"stub (prints)",                      msg:Msg::ModifierStub("Win")                },
+
     // Mouse — display only; actual dispatch is the mouse_area in ee-viewer
     Binding{ chord:Mouse,                         label:"left click",   group:"Mouse",      help:"previous image",                     msg:Msg::Qv(QVMsg::Left)                    },
     Binding{ chord:Mouse,                         label:"right click",  group:"Mouse",      help:"next image",                         msg:Msg::Qv(QVMsg::Right)                   },
@@ -164,46 +176,6 @@ impl Chord {
 
             _ => false,
         }
-    }
-}
-
-// The exploratory cprintln! arms from the old subscription match — not real
-// bindings, just key discovery. Runs only when nothing in BINDINGS matched.
-#[rustfmt::skip]
-fn probe(event: &keyboard::Event) -> Option<Msg> {
-    use keyboard::Event as EV;
-
-    match event {
-        EV::KeyPressed { text: Some(v), modifiers,.. }
-            if  *modifiers == Modifiers::SHIFT ||
-                *modifiers == Modifiers::NONE      => match v.as_ref() {
-            "A" => { cprintln!("A"); None },
-            "!" => { cprintln!("!"); None },
-            "1" => { cprintln!("{v} "); None },
-            // a  => { cprintln!("~[c197]{a}"); None }
-            _  => None,
-        },
-
-        EV::KeyPressed { key: KK::Character(key), modifiers: Modifiers::ALT, text:Some(_text),..} => match key.as_ref() {
-            "w" => {cprintln!("Alt W"); None },
-            "1" => {cprintln!("Alt 1"); None },
-            // a  => { cprintln!("~[c197]Alt {text}"); None }
-            _  => None,
-        },
-        EV::KeyPressed { key: KK::Character(key), modifiers: Modifiers::CTRL, ..} => match key.as_ref() {
-            "w" => {cprintln!("Ctrl w"); None },
-            // a  => { cprintln!("~[c197]Ctrl {key}"); None }
-            _  => None,
-        },
-        EV::KeyPressed { key: KK::Character(key), modifiers: Modifiers::SHIFT, ..} => match key.as_ref() {
-            "w" => {cprintln!("W {event:?}"); None },
-            "a" => {cprintln!("a {event:?}"); None },
-            "1" => {cprintln!("1 {event:?}"); None },
-            // a  => { cprintln!("4: {key:?}"); None }
-            _  => None,
-        },
-
-        _ => None,
     }
 }
 
@@ -276,6 +248,11 @@ impl App {
 
             Msg::AltRightTest => {     // TEST CODE — safe to remove
                 cprintln!("hi");
+                Task::none()
+            }
+
+            Msg::ModifierStub(name) => {
+                cprintln!("~[c245]mod: {name}");
                 Task::none()
             }
 
@@ -422,10 +399,7 @@ impl App {
             self.qv.subscription().map(Msg::Qv),
 
             keyboard::listen().filter_map( |event|
-                match BINDINGS.iter().find( |b| b.chord.matches(&event) ) {
-                    Some(b) => Some(b.msg.clone()),
-                    None    => probe(&event),
-                }
+                BINDINGS.iter().find( |b| b.chord.matches(&event) ).map( |b| b.msg.clone() )
             ),
 
             iced::window::events().map( Msg::WindowEvent ),
