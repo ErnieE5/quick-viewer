@@ -22,12 +22,13 @@ libheif-rs = {version="2.7.0", features=["image"], optional=true }
 iced = { version = "0.14.0", features = ["image", "canvas", "advanced", "tokio",  "sipper", "wgpu"  ] }
 iced_core = {  version="0.14.0" }
 
-
-
-
-
-
-
-
-
-
+#   Monitor geometry for --screen / --span / --w / --h / --x / --y. Windows only, and
+#   target-gated so a Linux build never resolves, downloads or compiles it. The
+#   non-Windows path in geometry.rs falls back to iced's own defaults.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }

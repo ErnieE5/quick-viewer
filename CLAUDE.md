@@ -27,6 +27,7 @@ cargo clippy --all-targets
 - **`heif` feature is ON by default** (`default=["heif"]` in `qv-app/Cargo.toml`). It pulls in `libheif-rs` and, in `main`, calls `libheif_rs::integration::image::register_all_decoding_hooks()` so the `image` crate can decode HEIC. It links the **native libheif** library — setup is machine-specific and recorded exactly in **`HEIF-BUILD.md`** (Windows/vcpkg verified; Linux/pkg-config unverified). Build with `--no-default-features` to omit it; `.heic` files (still in the scan `EXTENSIONS` list) then fail to decode at load time.
 - **iced version swap:** both member `Cargo.toml`s build against crates.io **iced 0.14** but carry commented-out `path = "../../iced"` lines for the local iced **0.15-dev** clone. To switch, comment/uncomment the paired `iced` + `iced_core` lines in *both* crates together.
 - Useful runtime flags (see `qv-app/src/args.rs`): `-F/--fs` fullscreen, `-S` slideshow, `--delay <ms>`, `--cache-size`, `--look-ahead`/`--look-behind`, `--no-canvas` (start in `Image` mode), `--view-exif`, `--ns/--no-splash`, `--max-depth`.
+- Window geometry flags, named and behaving as ee_feh's: `--w`/`--h`, `--x`/`--y`, `--b` (trim off the bottom), `--screen <N>`, `--span`, `--overlay` (always-on-top), `--borderless`, and `--list-screens`. Naming **any** of `--x/--y/--w/--h/--b` cancels full screen, exactly as in ee_feh — asking for a size is asking for a window. Values are logical (DPI-scaled) pixels.
 
 ## Architecture
 
@@ -60,6 +61,15 @@ The single source of truth for "what images exist and where we are."
 - **`Canvas`** (default) — custom `canvas::Program for QuickViewer` impl at the bottom of `viewer.rs`. Manual fit-to-bounds math lives in `fit()` (aspect-preserving, centered). Draws `current_image_handle` or the splash (`empty_image`).
 - **`Image`** — plain iced image widget (selected at startup via `--no-canvas`).
 - **`Viewer`** — zoomable. **Middle-click emits `QVMsg::Swap`**, which toggles `zoom`, switches `render_mode` to `Viewer` (or back to `config.primary_render`), and **rebuilds the LRU cache from scratch** (allocation vs handle differ between modes).
+
+### Window geometry — `geometry.rs` (qv-app)
+
+Everything `window::Settings` needs, resolved **in `main()` before iced boots**. This ordering is the whole point: iced hands `window::Settings` to winit before an event loop exists, so monitor enumeration is not yet available and `--fs`/`--w`/`--screen` cannot be read from `App`. Hence `args::do_args()` runs at the top of `main()`, and `App::new(args, fullscreen)` receives the already-parsed `Args` via a capturing boot closure (which is why `Args` derives `Clone`).
+
+- **`--fs` is born fullscreen** via `window::Settings::fullscreen`, *not* a post-launch `window::set_mode`. There is no windowed frame to flash. `App.fullscreen` is initialised to what the window actually **is**, not to `args.fullscreen` — `--fs --screen N` and `--span` are covering borderless windows rather than a winit fullscreen, and F11 has to know the difference or its first press tries to leave a mode it was never in.
+- **DPI:** `become_dpi_aware()` claims `PER_MONITOR_AWARE_V2` at the very top of `main()`. Until that is set, `GetDpiForMonitor` answers 96 for every display whatever the real scaling is, and every rectangle converts by the wrong factor. winit sets the same context later from its own `become_dpi_aware()`, behind a `Once` that fails harmlessly when it is already set.
+- **Windows only**, behind `[target.'cfg(windows)'.dependencies] windows-sys` — a Linux build never resolves it. The `#[cfg(not(windows))]` stub returns no monitors, so `--screen`/`--span` have no base rectangle there while explicit `--x/--y/--w/--h` still work. On Wayland `--x/--y` and `--overlay` are silently ignored by the protocol; X11 honours both.
+- **`--span` is capped at 8192.** iced requests `wgpu::Limits::default()` (`iced_wgpu/src/window/compositor.rs:152`), whose `max_texture_dimension_2d` is 8192 — on *every* backend, since the ceiling is iced's request rather than the hardware's. A desktop wider than that cannot be covered; `virtual_rect()` says so and falls back to the primary display rather than letting wgpu panic.
 
 ### File discovery — `FileSystemHelper` (`file_system_helper.rs`)
 

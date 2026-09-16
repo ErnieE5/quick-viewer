@@ -3247,6 +3247,7 @@ dependencies = [
  "iced_core",
  "image",
  "libheif-rs",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -4,9 +4,57 @@ use clap::Parser;
 ///
 /// A rust/iced based quick view application.
 ///
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(version, about)]
 pub struct Args {
+
+    //
+    //  Window geometry. Names and rules follow ee_feh: a value given here overrides that
+    //  one component of the target screen's rectangle, and naming ANY of them cancels
+    //  full screen -- asking for a size is asking for a window. Values are logical
+    //  (DPI-scaled) pixels, the same units ee_feh's Qt geometry uses.
+    //
+
+    /// window width in pixels
+    #[arg(long, value_name="PIXELS")]
+    pub w: Option<u32>,
+
+    /// window height in pixels
+    #[arg(long, value_name="PIXELS")]
+    pub h: Option<u32>,
+
+    /// window x position
+    #[arg(long, value_name="PIXELS", allow_negative_numbers=true)]
+    pub x: Option<i32>,
+
+    /// window y position
+    #[arg(long, value_name="PIXELS", allow_negative_numbers=true)]
+    pub y: Option<i32>,
+
+    /// trim this many pixels off the bottom of the window
+    #[arg(long, value_name="PIXELS")]
+    pub b: Option<u32>,
+
+    /// which monitor to open on (see --list-screens)
+    #[arg(long, default_value_t=0, value_name="N")]
+    pub screen: usize,
+
+    /// cover every display
+    #[arg(long, visible_alias="all-screens")]
+    pub span: bool,
+
+    /// keep the window above every other window
+    #[arg(long)]
+    pub overlay: bool,
+
+    /// no title bar and no border
+    #[arg(long, visible_alias="bl")]
+    pub borderless: bool,
+
+    /// print what each --screen index refers to, then exit
+    #[arg(long)]
+    pub list_screens: bool,
+
 
     /// start full screen
     #[arg(long, short='F', visible_alias="fs")]

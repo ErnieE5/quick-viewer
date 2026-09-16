@@ -3,6 +3,7 @@ use ee_conio::{cprintln};
 use ee_viewer::{QuickViewer,QVConfig,QVMsg,RenderMode,SipProgress,FileSystemHelper,ImageKey};
 
 mod args;
+mod geometry;
 
 #[rustfmt::skip]    // column-aligned binding table lives in this module
 mod keyboard_bindings;
@@ -77,8 +78,7 @@ struct App {
 
 #[rustfmt::skip]
 impl App {
-    fn default() -> Self {
-        let args = args::do_args();
+    fn from_args(args: Args, fullscreen: bool) -> Self {
 
         let mut config = QVConfig::default();
 
@@ -97,7 +97,7 @@ impl App {
 
         Self {
             qv:                     QuickViewer::new(config),
-            fullscreen:             args.fullscreen,
+            fullscreen,
             current_scan_dir:       "".into(),
             sip_dir_task:           None,
 
@@ -105,20 +105,23 @@ impl App {
         }
     }
 
-    fn new() -> (Self, Task<Msg>) {
+    fn new(args: Args, fullscreen: bool) -> (Self, Task<Msg>) {
 
-        let mut m = vec![
+        let m = vec![
             Task::done( Msg::Welcome ),
             Task::done( Msg::Qv( QVMsg::Welcome ) ),
             Task::done( Msg::FindFilesOnPath ),
         ];
 
-        let mut me = App::default();
-
-        if me.fullscreen {
-            me.fullscreen = false;
-            m.push( Task::done(Msg::FullScreenToggle) );
-        }
+        //  The window is born full screen when --fs asks for it (window::Settings
+        //  carries the flag), so there is nothing to toggle here and no windowed
+        //  frame to flash.
+        //
+        //  `fullscreen` is what the window actually IS, not what was asked for:
+        //  --fs --screen N and --span are covering borderless windows rather than
+        //  a winit fullscreen, and F11 has to know the difference or its first
+        //  press tries to leave a mode we were never in.
+        let me = App::from_args(args, fullscreen);
 
         ( me, Task::batch(m) )
     }
@@ -297,14 +300,32 @@ pub fn main() -> IcedResult {
     #[cfg(feature = "heif")]
     libheif_rs::integration::image::register_all_decoding_hooks();
 
-    let settings = Settings {
-        transparent:true,
-        icon: Some(icon::from_file_data(include_bytes!("../../assets/icon.png"),Some(ImageFormat::Png)).expect("1")),
-        ..Settings::default()
-    };
+    //  Parsed here rather than inside App::new, because window::Settings is consumed
+    //  before any App exists -- see geometry.rs for why that matters.
+    //  Before anything -- including winit -- looks at a monitor. See geometry.rs.
+    geometry::become_dpi_aware();
+
+    let args = args::do_args();
+
+    if args.list_screens {
+        geometry::print_screens();
+        return Ok(());
+    }
+
+    let resolved = geometry::resolve(&args);
+
+    let settings = geometry::apply(
+        Settings {
+            transparent:true,
+            icon: Some(icon::from_file_data(include_bytes!("../../assets/icon.png"),Some(ImageFormat::Png)).expect("1")),
+            ..Settings::default()
+        },
+        &resolved,
+        args.overlay,
+    );
 
     application::timed(
-        App::new,
+        move || App::new(args.clone(), resolved.fullscreen),
         App::update,
         App::subscription,
         App::view
@@ -312,7 +333,6 @@ pub fn main() -> IcedResult {
     .window(settings)
     .theme(Theme::TokyoNight)
     .title("Quick Viewer")
-    .centered()
     .run()
 }
 
