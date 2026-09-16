@@ -3,6 +3,7 @@ use ee_conio::{cprintln};
 use ee_viewer::{QuickViewer,QVConfig,QVMsg,RenderMode,SipProgress,FileSystemHelper,ImageKey};
 
 mod args;
+#[rustfmt::skip]    // column-aligned geometry tables live in this module
 mod geometry;
 
 #[rustfmt::skip]    // column-aligned binding table lives in this module
@@ -300,11 +301,11 @@ pub fn main() -> IcedResult {
     #[cfg(feature = "heif")]
     libheif_rs::integration::image::register_all_decoding_hooks();
 
-    //  Parsed here rather than inside App::new, because window::Settings is consumed
-    //  before any App exists -- see geometry.rs for why that matters.
-    //  Before anything -- including winit -- looks at a monitor. See geometry.rs.
+    //  Before anything -- winit included -- looks at a monitor. See geometry.rs.
     geometry::become_dpi_aware();
 
+    //  Parsed here rather than inside App::new, because window::Settings is consumed
+    //  before any App exists -- see geometry.rs for why that matters.
     let args = args::do_args();
 
     if args.list_screens {

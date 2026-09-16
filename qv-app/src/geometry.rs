@@ -14,6 +14,9 @@
 //  DPI scale. That is the unit window::Settings speaks, and the same unit Qt gives ee_feh,
 //  so a number that meant one thing there means the same thing here.
 //
+//  The mod declaration in main.rs carries #[rustfmt::skip] for this whole file -- the
+//  column alignment below is deliberate.
+//
 
 use iced::window::{Position, Settings};
 use iced::{Point, Size};
@@ -35,7 +38,6 @@ const DEFAULT_H: f32 =  768.0;
 const MAX_SURFACE: f32 = 8192.0;
 
 #[derive(Debug, Clone, Copy)]
-#[rustfmt::skip]
 pub struct Rect {
     pub x: f32,
     pub y: f32,
@@ -44,7 +46,6 @@ pub struct Rect {
 }
 
 #[derive(Debug, Clone)]
-#[rustfmt::skip]
 pub struct Monitor {
     pub full:    Rect,      // the whole display
     pub work:    Rect,      // minus taskbar and friends
@@ -226,7 +227,6 @@ mod platform {
 pub use platform::{become_dpi_aware, monitors};
 
 #[derive(Debug, Clone)]
-#[rustfmt::skip]
 pub struct Resolved {
     pub size:        Size,
     pub position:    Position,
