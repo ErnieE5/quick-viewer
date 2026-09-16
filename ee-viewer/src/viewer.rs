@@ -110,6 +110,9 @@ pub enum ImageCacheItem {
 pub enum QVMsg {
     Welcome,
 
+    //  The splash, decoded off-thread. See load_splash().
+    SplashLoaded(ImageHandle),
+
     Left,
     Right,
     Slide(Instant),
@@ -288,6 +291,41 @@ macro_rules! whd_from_asset {
     }
 }
 
+//  How long to leave jasper alone for. Long enough that a directory with images in it
+//  has already put one on screen, so the decode never competes with the one decode that
+//  matters. Nothing is waiting on this: the window is already up and drawing.
+const SPLASH_DELAY_MS: u64 = 250;
+
+//
+//  The splash, off the startup path and out of the way.
+//
+//  whd_from_asset! is a full PNG decode plus a to_rgba8 copy -- 23.4ms for jasper,
+//  measured -- and it used to run inside QuickViewer::new, where nothing could proceed
+//  until it finished. That put it in front of the first frame every single launch.
+//
+//  Moving it to a worker thread alone was not enough. It then raced the first real
+//  image for CPU and cost first-image ~14ms, which is the wrong trade for a viewer: it
+//  bought a window sooner and paid with the picture later. So it waits first.
+//
+//  The reasoning behind waiting: if a real image turns up promptly then the splash was
+//  never going to be seen, and if the list is empty -- the case it exists for -- nothing
+//  is competing and it arrives right after the delay. Either way it is transparent until
+//  then, which is a window that is up and honest rather than one that is blocked.
+//
+//  spawn_blocking because this is CPU-bound, not IO-bound, and saying so keeps it off
+//  the async executor as well as off the render path.
+//
+async fn load_splash() -> ImageHandle {
+    tokio::time::sleep( Duration::from_millis(SPLASH_DELAY_MS) ).await;
+
+    tokio::task::spawn_blocking(|| {
+        let (w,h,d) = whd_from_asset!("../../assets/jasper.png");
+        ImageHandle::from_rgba(w, h, d)
+    })
+    .await
+    .expect("reality")
+}
+
 
 
 impl QuickViewer {
@@ -297,17 +335,11 @@ impl QuickViewer {
 
             render_mode:  config.primary_render,
 
-            empty_image: {
-                let (w,h,d) = if !config.no_empty_cat {
-                    whd_from_asset!("../../assets/jasper.png")
-                }
-                else {
-                    // 1 pixel zero opacity RGBA
-                    (1,1,vec![0,0,0,0])
-                };
-
-                ImageHandle::from_rgba(w, h, d)
-            },
+            //  Jasper is 1355x2169 of PNG and cost 23.4ms to decode here, on the
+            //  way to the first frame, every launch. He arrives later via
+            //  SplashLoaded; until then this 1x1 zero-opacity pixel stands in,
+            //  which is also exactly what --ns leaves in place permanently.
+            empty_image: ImageHandle::from_rgba(1, 1, vec![0,0,0,0]),
 
             loaded_image_info: HashMap::new(),
 
@@ -463,7 +495,12 @@ impl QuickViewer {
         self.now = now;
         // cprintln!("~[c7]{:10.4?}    {:80.80}",now-self.start,format!("{:?}",event) );
         match event {
-            QVMsg::Welcome          =>    { Task::none() }
+            QVMsg::Welcome          => {
+                if self.config.no_empty_cat { Task::none() }
+                else { Task::perform( load_splash(), QVMsg::SplashLoaded ) }
+            }
+
+            QVMsg::SplashLoaded(h)  => { self.empty_image = h; Task::none() }
 
             QVMsg::ClipFqp(key)     => {
                 match self.img_list.item_from_key(key) {
