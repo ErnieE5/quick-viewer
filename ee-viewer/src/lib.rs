@@ -18,6 +18,9 @@ mod img_list;
 #[rustfmt::skip]
 mod toast;
 
+#[rustfmt::skip]
+mod strip;
+
 pub use viewer::{
     QuickViewer,
     QVConfig,

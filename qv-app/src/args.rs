@@ -64,6 +64,14 @@ pub struct Args {
     #[arg(long,short='S',)]
     pub slideshow: bool,
 
+    /// left/right cut straight to the image instead of sliding it in
+    #[arg(long)]
+    pub no_slide: bool,
+
+    /// how long a left/right slide takes, in milliseconds
+    #[arg(long, value_name="MS", default_value_t=400, value_parser=clap::value_parser!(u64).range(1..=10_000))]
+    pub slide_ms: u64,
+
     /// delay to advance a slideshow in milliseconds
     #[arg(long,value_name="DELAY", default_value_t=1000, value_parser=clap::value_parser!(u64).range(crate::MIN_DELAY..86_400_00))]
     pub delay: u64,

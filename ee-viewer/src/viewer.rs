@@ -13,6 +13,7 @@ use crate::file_traits::{LoadData};
 use crate::file_system_helper::{FileSystemHelper};
 
 use crate::img_list::{ImageList};
+use crate::strip::{Strip};
 
 
 use iced::mouse::{ ScrollDelta };
@@ -116,6 +117,7 @@ pub enum QVMsg {
     Left,
     Right,
     Slide(Instant),
+    Frame(Instant),     // a display frame, subscribed to only while the strip is sliding
 
     DecDelay,
     IncDelay,
@@ -206,6 +208,8 @@ pub struct QVConfig
     pub max_depth:          usize,
     pub time_forward_loop:  bool,
     pub primary_render:     RenderMode,
+    pub slide:              bool,
+    pub slide_ms:           u64,
 }
 
 
@@ -224,6 +228,8 @@ impl QVConfig {
             max_depth:          10000,
             time_forward_loop:  false,
             primary_render:     RenderMode::Canvas,
+            slide:              true,
+            slide_ms:           crate::strip::SLIDE_MS,
         }
     }
 }
@@ -253,6 +259,7 @@ pub struct QuickViewer {
 
     zoom:                       bool,
     slide_mode:                 SlideMode,
+    strip:                      Strip,
 
     empty_image:                ImageHandle,
 }
@@ -362,6 +369,7 @@ impl QuickViewer {
 
             zoom:                   false,
             slide_mode:             SlideMode::Forward,
+            strip:                  Strip::new(config.slide_ms),
 
             config
         }
@@ -405,11 +413,51 @@ impl QuickViewer {
             Err(e)  => { cprintln!("~[c196]{e:?} ~[c255]{pos}"); return Task::none(); }
         };
 
+        //  Every move lands by default. Left/Right opt in to a slide after this returns.
+        self.strip.jump();
+
         if !self.showit() {
             self.show_when_loaded = Some(key);
         }
 
         self.preload_task(false)
+    }
+
+    //  Left/Right: a goto that slides. The goto lands (see goto_image_task); the strip
+    //  is then posed back over the old image and eased onto the new one.
+    fn step_task(&mut self, step:isize, now:Instant) -> Task<QVMsg> {
+        let Some(idx) = self.img_list.peek_range(step..=step).next() else {
+            return Task::none();
+        };
+
+        let carry = self.strip.offset();     // goto lands the strip; a slide resumes from here
+        let t = self.goto_image_task(idx);
+
+        //  Only onto an image that is already up. While it is still loading the canvas
+        //  is showing the old one, and sliding that in from the side would be a lie.
+        if self.config.slide
+            && matches!(self.render_mode, RenderMode::Canvas)
+            && self.show_when_loaded.is_none()
+            && self.img_list.len() > 1
+        {
+            self.strip.go_from(carry, step as i32, now);
+        }
+
+        t
+    }
+
+    //  The handle for the image `slot` places from the current one, if it is cached.
+    //  peek, not get: drawing a neighbour must not reorder the LRU.
+    fn slot_handle(&self, slot:i32) -> Option<&ImageHandle> {
+        if slot == 0 {
+            return self.current_image_handle.as_ref();
+        }
+        let pos = self.img_list.peek_range(slot as isize..=slot as isize).next()?;
+        let key = self.img_list.key_at(pos).ok()?;
+        match self.image_cache.peek(&key)? {
+            ImageCacheItem::Handle(h)       => Some(h),
+            ImageCacheItem::Alloc(a,_d)     => Some(a.handle()),
+        }
     }
 
     fn preload_task(&mut self,only_one:bool) -> Task<QVMsg> {
@@ -875,12 +923,13 @@ impl QuickViewer {
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 } else {
-                    let Some(next_idx) = self.img_list.peek_range(-1..=-1).next() else {
-                        return Task::none();
-                    };
-
-                    self.goto_image_task(next_idx)
+                    self.step_task(-1, now)
                 }
+            }
+
+            QVMsg::Frame(at) => {
+                self.strip.tick(at);
+                Task::none()
             }
 
             QVMsg::Slide(_tick) => {
@@ -922,11 +971,7 @@ impl QuickViewer {
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 } else {
-                    let Some(next_idx) = self.img_list.peek_range(1..=1).next() else {
-                        return Task::none();
-                    };
-
-                    self.goto_image_task(next_idx)
+                    self.step_task(1, now)
                 }
             }
 
@@ -1326,6 +1371,11 @@ impl QuickViewer {
             s.push( time::every(time::Duration::from_millis(self.config.delay)).map(QVMsg::Slide) );
         }
 
+        //  The frame clock runs only while something is moving: an idle viewer pays nothing.
+        if self.strip.active() {
+            s.push( iced::window::frames().map(QVMsg::Frame) );
+        }
+
         Subscription::batch(s)
     }
 
@@ -1379,6 +1429,31 @@ impl<Message> Program<Message> for QuickViewer {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
+
+        //  Mid-slide: the current image and its neighbour, each fitted in its own slot and
+        //  laid side by side (see strip.rs). The canvas does not clip, so this does.
+        //  At rest the strip is 0..=0 at offset 0 and this is skipped for the plain draw.
+        if self.strip.active() {
+            let size = bounds.size();
+            let dx   = self.strip.offset();
+
+            frame.with_clip( Rectangle::new(Point::ORIGIN, size), |frame| {
+                for slot in self.strip.slots() {
+                    let Some(han) = self.slot_handle(slot) else { continue; };
+
+                    if renderer.load_image(han).is_err() { continue; }
+
+                    let Some(g) = renderer.measure_image(han) else { continue; };
+
+                    let mut r = self.fit(bounds, g.width as f32, g.height as f32);
+                    r.x += (slot as f32 + dx) * size.width;
+
+                    frame.draw_image( r, han );
+                }
+            });
+
+            return vec![frame.into_geometry()];
+        }
 
         if let Some(han) = self.current_image_handle.clone() {
             match renderer.load_image(&han) {

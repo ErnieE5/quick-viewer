@@ -90,6 +90,8 @@ impl App {
         config.cache_size           = args.cache_size;
         config.no_empty_cat         = args.no_splash;
         config.slideshow            = args.slideshow;
+        config.slide                = !args.no_slide;
+        config.slide_ms             = args.slide_ms;
         config.font_size            = args.font_size;
         config.view_exif            = args.view_exif;
         config.delay                = args.delay;
