@@ -53,13 +53,16 @@ enum Msg {
     FullScreenToggle,
     BorderlessToggle,
 
+    #[allow(dead_code)]     // stub: handler is Task::none(), nothing sends it yet
     GetImageHandle(ImageKey,QVMsg),
+    #[allow(dead_code)]     // stub: handler is Task::none(), nothing sends it yet
     GetImageAlloc(ImageKey,QVMsg),
 
     FileDropped(PathBuf),
     FindFilesOnPath,
     FindFilesProgress(SipProgress),
     FileFindComplete ,
+    #[allow(dead_code)]     // live handler; its sender, the "stop" button in view(), is commented out
     CancelFileFind,
 
 
