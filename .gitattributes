@@ -1,0 +1,3 @@
+# LF everywhere, on every machine. Without this the system core.autocrlf=true
+# checks files out CRLF and warns on every LF file it touches.
+* text=auto eol=lf
