@@ -65,6 +65,7 @@ pub(crate) const BINDINGS: &[Binding] = &[
     // Display
     Binding{ chord:Named(KN::F11),                label:"F11",          group:"Display",    help:"toggle fullscreen",                  msg:Msg::FullScreenToggle                   },
     Binding{ chord:Text("f"),                     label:"f",            group:"Display",    help:"toggle fullscreen",                  msg:Msg::FullScreenToggle                   },
+    Binding{ chord:Char("b",Modifiers::ALT),      label:"Alt+B",        group:"Display",    help:"toggle borderless",                  msg:Msg::BorderlessToggle                   },
     Binding{ chord:Char("e",Modifiers::ALT),      label:"Alt+E",        group:"Display",    help:"toggle EXIF panel",                  msg:Msg::Qv(QVMsg::ExifDisplayToggle)       },
     Binding{ chord:Char("d",Modifiers::ALT),      label:"Alt+D",        group:"Display",    help:"toggle pending-load overlay",        msg:Msg::Qv(QVMsg::LookAheadDisplayToggle)  },
     Binding{ chord:Char("-",Modifiers::CTRL),     label:"Ctrl+-",       group:"Display",    help:"smaller UI text",                    msg:Msg::Qv(QVMsg::FontDown)                },

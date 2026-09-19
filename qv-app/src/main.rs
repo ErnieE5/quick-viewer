@@ -51,6 +51,7 @@ enum Msg {
     ModifierStub(&'static str),     // stub for bare modifier presses — fill with real actions later
     WindowEvent( (Id,Event) ),
     FullScreenToggle,
+    BorderlessToggle,
 
     GetImageHandle(ImageKey,QVMsg),
     GetImageAlloc(ImageKey,QVMsg),
@@ -174,6 +175,12 @@ impl App {
                 let mode = if self.fullscreen { Mode::Fullscreen } else { Mode::Windowed };
 
                 window::latest().and_then(move |id| window::set_mode(id, mode) )
+            }
+
+            Msg::BorderlessToggle => {
+                use iced::window;
+
+                window::latest().and_then(window::toggle_decorations)
             }
 
             Msg::FindFilesProgress(p) => {
