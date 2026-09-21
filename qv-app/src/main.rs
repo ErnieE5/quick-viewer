@@ -309,7 +309,57 @@ impl App {
 }
 
 
+//
+//  Stop libheif scanning the root of the current drive for plugins.
+//
+//  This build of libheif has no plugin directory compiled in, so the empty path plus its
+//  own "\*.dll" resolves to the root of whatever drive is current: C:\appverifUI.dll and
+//  C:\vfcompat.dll are 32-bit Application Verifier DLLs, and LoadLibraryA on either from
+//  a 64-bit process fails with 193 (ERROR_BAD_EXE_FORMAT). libheif prints
+//  "LoadLibraryA error: 193" and moves on -- harmless, but it re-inits per decode, so a
+//  directory of HEICs fills the console with it. Run from a drive whose root holds no
+//  DLLs and it never appears; that is the whole difference.
+//
+//  All decoders here are built in, so there are no plugins to find. Point it at a path
+//  that holds none. A path set by hand wins: this only fills the blank.
+//
+#[cfg(all(windows, feature = "heif"))]
+fn quiet_heif_plugin_scan() {
+    if std::env::var_os("LIBHEIF_PLUGIN_PATH").is_some() { return; }
+
+    let Ok(exe) = std::env::current_exe() else { return; };
+    let Some(dir) = exe.parent() else { return; };
+
+    let path = dir.join("heif-plugins");
+
+    //  SAFETY: single-threaded, at the very top of main, before anything reads the
+    //  environment -- no other thread exists to race the write.
+    unsafe { std::env::set_var("LIBHEIF_PLUGIN_PATH", &path); }
+
+    //  ...and again through the CRT, which is the copy that matters here. Rust's set_var
+    //  is SetEnvironmentVariableW; libheif asks getenv(), and the CRT answers from its own
+    //  environment block, built at process start and NOT updated by the Win32 call. Set
+    //  only one of the two and the scan still happens.
+    {
+        use std::ffi::CString;
+        use std::os::raw::{c_char,c_int};
+
+        unsafe extern "C" {
+            fn _putenv_s(name: *const c_char, value: *const c_char) -> c_int;
+        }
+
+        let Ok(name) = CString::new("LIBHEIF_PLUGIN_PATH") else { return; };
+        let Ok(val)  = CString::new(path.to_string_lossy().as_bytes()) else { return; };
+
+        //  SAFETY: two valid, NUL-terminated C strings; _putenv_s copies both.
+        unsafe { _putenv_s(name.as_ptr(), val.as_ptr()); }
+    }
+}
+
 pub fn main() -> IcedResult {
+    #[cfg(all(windows, feature = "heif"))]
+    quiet_heif_plugin_scan();
+
     #[cfg(feature = "heif")]
     libheif_rs::integration::image::register_all_decoding_hooks();
 
