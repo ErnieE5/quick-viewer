@@ -14,7 +14,8 @@ use crate::file_traits::{ LoadData };
 use std::path::{PathBuf,Component};
 use std::time::{Instant};
 
-use image::ImageReader;
+use image::{ImageReader,ImageDecoder,DynamicImage};
+use image::metadata::Orientation;
 use std::fs::File;
 use std::io::{ Seek, SeekFrom };
 
@@ -78,12 +79,35 @@ impl FileSystemHelper {
             return Err(ImageError::ErrorGuessingFormat(id));
         };
 
-        let image = match reader.decode() {
-            Ok(i) => i,
-            Err(_e) => {
-                return Err(ImageError::ErrorDecodingImage(id));
-            }
+        //  Not reader.decode(): that ignores EXIF orientation, so a portrait JPEG shot
+        //  sideways shows sideways. Going through the decoder lets us ask it first.
+        //  HEIC is already upright -- libheif applies its own irot/imir -- and its
+        //  image-crate hook reports no orientation, so it is not turned twice.
+        //
+        //  In its own block because the decoder is not Send: it must be gone before the
+        //  yield_now().await below, or the whole load future stops being Send.
+        let image = {
+            let mut decoder = match reader.into_decoder() {
+                Ok(d) => d,
+                Err(_e) => {
+                    return Err(ImageError::ErrorDecodingImage(id));
+                }
+            };
+
+            //  An unreadable orientation is not a reason to fail the image: show it as stored.
+            let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+
+            let mut image = match DynamicImage::from_decoder(decoder) {
+                Ok(i) => i,
+                Err(_e) => {
+                    return Err(ImageError::ErrorDecodingImage(id));
+                }
+            };
+
+            image.apply_orientation(orientation);   // a 90/270 turn swaps width and height
+            image
         };
+
         let decode = decode.elapsed();
 
         tokio::task::yield_now().await;
