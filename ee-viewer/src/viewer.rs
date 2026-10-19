@@ -14,6 +14,8 @@ use crate::file_system_helper::{FileSystemHelper};
 
 use crate::img_list::{ImageList};
 use crate::strip::{Strip};
+use crate::scale::{ScaleMode};
+use crate::cross::{Cross,Motion};
 
 
 use iced::mouse::{ ScrollDelta };
@@ -85,6 +87,7 @@ pub enum SlideMode {
 }
 
 impl SlideMode {
+    #[allow(dead_code)]     // Alt+S cycled it; the last move decides the direction now, as in ee_feh
     pub fn next(&self) -> Self {
         match self {
             SlideMode::Forward => SlideMode::Reverse,
@@ -117,7 +120,8 @@ pub enum QVMsg {
     Left,
     Right,
     Slide(Instant),
-    Frame(Instant),     // a display frame, subscribed to only while the strip is sliding
+    Frame(Instant),     // a display frame, subscribed to only while the strip slides or a cross runs
+    ScaleFactor(f32),   // the window's DPI scale: 1.5 at 150%. What 1:1 is measured in.
 
     DecDelay,
     IncDelay,
@@ -127,7 +131,10 @@ pub enum QVMsg {
 
     LookAheadDisplayToggle,
     ExifDisplayToggle,
-    SlideModeToggle,
+    ScaleModeNext,
+    ScaleModePrev,
+    MotionNext,
+    MotionPrev,
 
     Space,
     Sort,
@@ -208,8 +215,12 @@ pub struct QVConfig
     pub max_depth:          usize,
     pub time_forward_loop:  bool,
     pub primary_render:     RenderMode,
-    pub slide:              bool,
     pub slide_ms:           u64,
+    pub motion:             Motion,
+    pub fade_ms:            u64,
+    pub wipe_ms:            u64,
+    pub scale_mode:         ScaleMode,
+    pub surface:            iced::Color,    // what is behind the canvas; a cross fades the uncovered parts to it
 }
 
 
@@ -228,8 +239,12 @@ impl QVConfig {
             max_depth:          10000,
             time_forward_loop:  false,
             primary_render:     RenderMode::Canvas,
-            slide:              true,
             slide_ms:           crate::strip::SLIDE_MS,
+            motion:             Motion::Wipe,
+            fade_ms:            crate::cross::FADE_MS,
+            wipe_ms:            crate::cross::WIPE_MS,
+            scale_mode:         ScaleMode::Fit,
+            surface:            iced::Color::BLACK,
         }
     }
 }
@@ -260,6 +275,14 @@ pub struct QuickViewer {
     zoom:                       bool,
     slide_mode:                 SlideMode,
     strip:                      Strip,
+
+    motion:                     Motion,
+    cross:                      Cross,
+    departed:                   Option<ImageHandle>,        // what a cross is crossing from
+    cross_when_loaded:          Option<(ImageHandle,bool)>, // a cross waiting on its arriving image: (departed, forward)
+    scale_mode:                 ScaleMode,
+    scale_factor:               f32,
+    surface:                    ImageHandle,                // 1x1 of config.surface; images draw in order, fills do not
 
     empty_image:                ImageHandle,
 }
@@ -371,6 +394,14 @@ impl QuickViewer {
             slide_mode:             SlideMode::Forward,
             strip:                  Strip::new(config.slide_ms),
 
+            motion:                 config.motion,
+            cross:                  Cross::new(),
+            departed:               None,
+            cross_when_loaded:      None,
+            scale_mode:             config.scale_mode,
+            scale_factor:           1.0,
+            surface:                ImageHandle::from_rgba(1, 1, config.surface.into_rgba8().to_vec()),
+
             config
         }
     }
@@ -413,8 +444,9 @@ impl QuickViewer {
             Err(e)  => { cprintln!("~[c196]{e:?} ~[c255]{pos}"); return Task::none(); }
         };
 
-        //  Every move lands by default. Left/Right opt in to a slide after this returns.
+        //  Every move lands by default. move_task opts in to a motion after this returns.
         self.strip.jump();
+        self.cross_when_loaded = None;
 
         if !self.showit() {
             self.show_when_loaded = Some(key);
@@ -423,27 +455,95 @@ impl QuickViewer {
         self.preload_task(false)
     }
 
-    //  Left/Right: a goto that slides. The goto lands (see goto_image_task); the strip
-    //  is then posed back over the old image and eased onto the new one.
+    //  Left/Right and the scroll wheel: a move of `step` along the list. The direction
+    //  sticks -- the slideshow carries on the way the last step went, as ee_feh's does.
     fn step_task(&mut self, step:isize, now:Instant) -> Task<QVMsg> {
         let Some(idx) = self.img_list.peek_range(step..=step).next() else {
             return Task::none();
         };
 
-        let carry = self.strip.offset();     // goto lands the strip; a slide resumes from here
-        let t = self.goto_image_task(idx);
+        self.slide_mode = if step < 0 { SlideMode::Reverse } else { SlideMode::Forward };
 
-        //  Only onto an image that is already up. While it is still loading the canvas
-        //  is showing the old one, and sliding that in from the side would be a lie.
-        if self.config.slide
-            && matches!(self.render_mode, RenderMode::Canvas)
-            && self.show_when_loaded.is_none()
-            && self.img_list.len() > 1
-        {
-            self.strip.go_from(carry, step as i32, now);
+        self.move_task(idx, Some(step), now)
+    }
+
+    //  A goto by the current motion. The goto lands (see goto_image_task); then a slide
+    //  poses the strip back over the old image and eases it onto the new one, and a fade
+    //  or wipe crosses from the old image to the new. `step` is how far along the list
+    //  this went, when that is a step at all: a slide needs one, a jump (Home, random)
+    //  only crosses, and a cross sweeps the way the step went.
+    fn move_task(&mut self, pos:usize, step:Option<isize>, now:Instant) -> Task<QVMsg> {
+        let carry   = self.strip.offset();      // goto lands the strip; a slide resumes from here
+        let before  = self.current_image_handle.clone();
+        let from    = self.img_list.pos().ok();
+
+        let t = self.goto_image_task(pos);
+
+        if !matches!(self.render_mode, RenderMode::Canvas) || self.img_list.len() < 2 || from == Some(pos) {
+            return t;
+        }
+
+        let forward = match step {
+            Some(s) => s >= 0,
+            None    => from.is_none_or(|f| pos >= f),
+        };
+
+        match self.motion {
+            Motion::Instant => {
+                self.cross.land();
+                self.departed = None;
+            }
+
+            //  Only onto an image that is already up. While it is still loading the canvas
+            //  is showing the old one, and sliding that in from the side would be a lie.
+            Motion::Slide => {
+                self.cross.land();
+                self.departed = None;
+                if let Some(s) = step && self.show_when_loaded.is_none() {
+                    self.strip.go_from(carry, s as i32, now);
+                }
+            }
+
+            //  The cross starts when the arriving image is up: now, or when it loads.
+            Motion::Fade | Motion::Wipe => {
+                if let Some(b) = before {
+                    if self.show_when_loaded.is_none() {
+                        self.cross_task(b, forward, now);
+                    } else {
+                        self.cross_when_loaded = Some((b, forward));
+                    }
+                }
+            }
         }
 
         t
+    }
+
+    fn cross_task(&mut self, before:ImageHandle, forward:bool, now:Instant) {
+        let ms = match self.motion { Motion::Fade => self.config.fade_ms, _ => self.config.wipe_ms };
+
+        //  Mid-cross the departed image stays the departed image; the mix runs on.
+        if !self.cross.go(ms, forward, now) || self.departed.is_none() {
+            self.departed = Some(before);
+        }
+    }
+
+    //  The image show_when_loaded was waiting for is up: start the cross that waited on it.
+    fn arrived(&mut self, now:Instant) {
+        if let Some((b,f)) = self.cross_when_loaded.take() {
+            self.cross_task(b, f, now);
+        }
+    }
+
+    //  Toast `s`, replacing whatever toast is up rather than stacking under it.
+    fn say(&mut self, s:String) {
+        if !self.toasts.is_empty() {
+            self.toasts[0].message = s;
+        }
+        else
+        {
+            self.toasts.push( Toast { message: s } );
+        }
     }
 
     //  The handle for the image `slot` places from the current one, if it is cached.
@@ -600,8 +700,33 @@ impl QuickViewer {
                 Task::none()
             }
 
-            QVMsg::SlideModeToggle => {
-                self.slide_mode = self.slide_mode.next();
+            QVMsg::ScaleModeNext | QVMsg::ScaleModePrev => {
+                self.scale_mode = if matches!(event, QVMsg::ScaleModeNext) { self.scale_mode.next() } else { self.scale_mode.prev() };
+                self.say( self.scale_mode.name().into() );
+                cprintln!("~[c240]scale {}", self.scale_mode.name());
+                Task::none()
+            }
+
+            QVMsg::MotionNext | QVMsg::MotionPrev => {
+                self.motion = if matches!(event, QVMsg::MotionNext) { self.motion.next() } else { self.motion.prev() };
+
+                //  Each motion keeps its own pace, so cycling onto the fade does not run it at the wipe's.
+                let ms = match self.motion {
+                    Motion::Fade    => Some(self.config.fade_ms),
+                    Motion::Wipe    => Some(self.config.wipe_ms),
+                    Motion::Slide   => Some(self.config.slide_ms),
+                    Motion::Instant => None,
+                };
+                let said = match ms { Some(ms) => format!("{} {ms} ms", self.motion.name()), None => self.motion.name().into() };
+
+                self.say( said.clone() );
+                cprintln!("~[c240]motion {said}");
+                Task::none()
+            }
+
+            QVMsg::ScaleFactor(f) => {
+                self.scale_factor = if f > 0.0 { f } else { 1.0 };
+                cprintln!("~[c240]scale factor {}", self.scale_factor);
                 Task::none()
             }
 
@@ -720,6 +845,7 @@ impl QuickViewer {
 
                             if self.showit() {
                                 self.show_when_loaded = None;
+                                self.arrived(now);
                             }
                         }
                         Task::none()
@@ -754,6 +880,7 @@ impl QuickViewer {
 
                     if self.showit() {
                         self.show_when_loaded = None;
+                        self.arrived(now);
                     }
                 }
 
@@ -831,8 +958,9 @@ impl QuickViewer {
                         Ok(i)   => i,
                         Err(_)  => { return Task::none(); }
                     };
+                    self.slide_mode = SlideMode::Random;     // the slideshow carries on the way the last move went
                     self.pending_image_requests.drain();
-                    self.goto_image_task( next_image )
+                    self.move_task( next_image, None, now )
                 }
             }
 
@@ -848,7 +976,7 @@ impl QuickViewer {
                     };
 
                     self.pending_image_requests.drain();
-                    self.goto_image_task(idx)
+                    self.move_task(idx, None, now)
                 }
             }
 
@@ -864,7 +992,7 @@ impl QuickViewer {
                     };
 
                     self.pending_image_requests.drain();
-                    self.goto_image_task(idx)
+                    self.move_task(idx, None, now)
                 }
             }
 
@@ -875,7 +1003,7 @@ impl QuickViewer {
                 };
 
                 self.pending_image_requests.drain();
-                self.goto_image_task(next_image)
+                self.move_task(next_image, None, now)
             },
 
             QVMsg::End => {
@@ -885,7 +1013,7 @@ impl QuickViewer {
                 };
 
                 self.pending_image_requests.drain();
-                self.goto_image_task( next_image )
+                self.move_task( next_image, None, now )
             },
 
             QVMsg::Swap => {
@@ -910,12 +1038,10 @@ impl QuickViewer {
                 {
                     let delta:isize = -y as isize;
 
-                    let Some(idx) = self.img_list.peek_range(delta..=delta).next() else {
-                        return Task::none();
-                    };
+                    if delta == 0 { return Task::none(); }
 
                     self.pending_image_requests.drain();
-                    self.goto_image_task(idx)
+                    self.step_task(delta, now)
                 }
             }
 
@@ -929,6 +1055,10 @@ impl QuickViewer {
 
             QVMsg::Frame(at) => {
                 self.strip.tick(at);
+                self.cross.tick(at);
+                if !self.cross.active() {
+                    self.departed = None;
+                }
                 Task::none()
             }
 
@@ -936,6 +1066,12 @@ impl QuickViewer {
                 if self.show_when_loaded.is_some() {
                     Task::none()
                 } else {
+                    let step = match self.slide_mode {
+                        SlideMode::Forward => Some( 1),
+                        SlideMode::Reverse => Some(-1),
+                        SlideMode::Random  => None,
+                    };
+
                     let Some(next_idx) = (match self.slide_mode {
                         SlideMode::Forward => { self.img_list.peek_range( 1..= 1).next() },
                         SlideMode::Reverse => { self.img_list.peek_range(-1..=-1).next() },
@@ -962,7 +1098,7 @@ impl QuickViewer {
                         }
                     }
 
-                    self.goto_image_task(next_idx)
+                    self.move_task(next_idx, step, now)
                 }
             }
 
@@ -1372,7 +1508,7 @@ impl QuickViewer {
         }
 
         //  The frame clock runs only while something is moving: an idle viewer pays nothing.
-        if self.strip.active() {
+        if self.strip.active() || self.cross.active() {
             s.push( iced::window::frames().map(QVMsg::Frame) );
         }
 
@@ -1387,30 +1523,56 @@ use iced::widget::canvas::{ Program, Frame };
 
 use iced::{ Rectangle, Size, Point, };
 use iced_core::image::Renderer as CoreRenderer;
+use iced_core::image::Image as CoreImage;
+
+//  A wipe's soft edge, as a share of the window's width -- ee_feh's _feather -- and how
+//  many steps of opacity draw it. The canvas has no gradient mask for an image, so the
+//  ramp is bands, each clipped and drawn at its own opacity.
+const FEATHER:  f32 = 0.12;
+const BANDS:    usize = 24;
 
 impl QuickViewer {
 
+    //  The logical size of one physical pixel: what 1:1 is measured in.
+    fn px(&self) -> f32 { 1.0 / self.scale_factor }
 
-    fn fit(&self,bounds: Rectangle, w: f32, h: f32) -> Rectangle {
-        let rw = bounds.width / w;
-        let rh = bounds.height / h;
+    //  Where an image of w x h goes, by the current scale mode. See scale.rs.
+    fn place(&self, size: Size, w: f32, h: f32) -> Rectangle {
+        self.scale_mode.place(size, w, h, self.px())
+    }
 
-        let q = if (w * rw).floor() <= bounds.width && (h * rw).floor() <= bounds.height {
-            Size::new(w * rw * 1.0/*self.scale_factor*/, h * rw * 1.0/*self.scale_factor*/)
-        } else if (w * rh).floor() <= bounds.width && (h * rh).floor() <= bounds.height {
-            Size::new(w * rh * 1.0/*self.scale_factor*/, h * rh * 1.0/*self.scale_factor*/)
-        } else {
-            cprintln!("{w:?} {h:?} {bounds:?} {rw:?} {rh:?}");
-            Size::new(0.0, 0.0);
-            todo!();
-        };
+    //  The splash is always fitted, whatever the mode.
+    fn fit(&self, size: Size, w: f32, h: f32) -> Rectangle {
+        ScaleMode::Fit.place(size, w, h, self.px())
+    }
 
-        let a = Point::new(
-            (bounds.width - q.width) / 2.0,
-            (bounds.height - q.height) / 2.0,
-        );
+    //  The arriving image of a cross, `a` of the way in, inside `clip`. The window it
+    //  does not cover goes to the surface by the same amount, so where the two images'
+    //  shapes differ the old one fades out rather than popping off at the end.
+    fn arriving(&self, frame: &mut Frame, window: Rectangle, clip: Rectangle, a: f32, r: Rectangle, han: &ImageHandle) {
+        let Some(clip) = clip.intersection(&window) else { return; };
 
-        Rectangle::new(a, q)
+        let (ww, wh)    = (window.width, window.height);
+        let top         = r.y.clamp(0.0, wh);
+        let bottom      = (r.y + r.height).clamp(0.0, wh);
+        let left        = r.x.clamp(0.0, ww);
+        let right       = (r.x + r.width).clamp(0.0, ww);
+
+        let around = [
+            Rectangle::new( Point::new(0.0,   0.0   ), Size::new(ww,         top         ) ),
+            Rectangle::new( Point::new(0.0,   bottom), Size::new(ww,         wh - bottom ) ),
+            Rectangle::new( Point::new(0.0,   top   ), Size::new(left,       bottom - top) ),
+            Rectangle::new( Point::new(right, top   ), Size::new(ww - right, bottom - top) ),
+        ];
+
+        frame.with_clip( clip, |frame| {
+            for g in around {
+                if g.width > 0.0 && g.height > 0.0 {
+                    frame.draw_image( g, CoreImage::new(self.surface.clone()).opacity(a) );
+                }
+            }
+            frame.draw_image( r, CoreImage::new(han.clone()).opacity(a) );
+        });
     }
 }
 
@@ -1430,27 +1592,31 @@ impl<Message> Program<Message> for QuickViewer {
     ) -> Vec<canvas::Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
 
-        //  Mid-slide: the current image and its neighbour, each fitted in its own slot and
-        //  laid side by side (see strip.rs). The canvas does not clip, so this does.
+        let size    = bounds.size();
+        let window  = Rectangle::new(Point::ORIGIN, size);
+
+        //  Mid-slide: the current image and its neighbour, each placed in its own slot and
+        //  laid side by side (see strip.rs). The canvas does not clip, so this does -- each
+        //  slot to itself, since Fill and 1:1 can be wider than a slot.
         //  At rest the strip is 0..=0 at offset 0 and this is skipped for the plain draw.
         if self.strip.active() {
-            let size = bounds.size();
             let dx   = self.strip.offset();
 
-            frame.with_clip( Rectangle::new(Point::ORIGIN, size), |frame| {
-                for slot in self.strip.slots() {
-                    let Some(han) = self.slot_handle(slot) else { continue; };
+            for slot in self.strip.slots() {
+                let Some(han) = self.slot_handle(slot) else { continue; };
 
-                    if renderer.load_image(han).is_err() { continue; }
+                if renderer.load_image(han).is_err() { continue; }
 
-                    let Some(g) = renderer.measure_image(han) else { continue; };
+                let Some(g) = renderer.measure_image(han) else { continue; };
 
-                    let mut r = self.fit(bounds, g.width as f32, g.height as f32);
-                    r.x += (slot as f32 + dx) * size.width;
+                let shift   = (slot as f32 + dx) * size.width;
+                let mut r   = self.place(size, g.width as f32, g.height as f32);
+                r.x += shift;
 
-                    frame.draw_image( r, han );
-                }
-            });
+                let Some(clip) = Rectangle::new(Point::new(shift, 0.0), size).intersection(&window) else { continue; };
+
+                frame.with_clip( clip, |frame| { frame.draw_image( r, han ); });
+            }
 
             return vec![frame.into_geometry()];
         }
@@ -1468,7 +1634,60 @@ impl<Message> Program<Message> for QuickViewer {
                 None    => (0.0, 0.0),
             };
 
-            frame.draw_image( self.fit(bounds, w , h), &han.clone());
+            let r = self.place(size, w, h);
+
+            //  Mid-cross: the image it left, in full, and the arriving one over it. See cross.rs.
+            let departed = match (&self.departed, self.cross.active()) {
+                (Some(d), true) if renderer.load_image(d).is_ok() => renderer.measure_image(d).map(|g| (d, g)),
+                _ => None,
+            };
+
+            match departed {
+                None => {
+                    frame.with_clip( window, |frame| { frame.draw_image( r, &han ); });
+                }
+
+                Some((d, g)) => {
+                    let dr = self.place(size, g.width as f32, g.height as f32);
+                    frame.with_clip( window, |frame| { frame.draw_image( dr, d ); });
+
+                    let mix = self.cross.mix();
+
+                    if self.motion != Motion::Wipe {
+                        self.arriving(&mut frame, window, window, mix, r, &han);
+                    } else {
+                        //  A soft edge sweeping the way the slide would have gone: forward,
+                        //  the new image is to the right on the strip, so it comes in from the
+                        //  right; back, from the left. The edge starts wholly off one side and
+                        //  ends wholly off the other.
+                        let ww = size.width;
+                        let f  = ww * FEATHER;
+                        let fw = f / BANDS as f32;
+
+                        //  `solid` is where the arriving image is wholly in; the ramp is the
+                        //  feather beside it, from `ramp` for one feather, fading to nothing
+                        //  away from the solid side.
+                        let (solid, ramp, forward) = if self.cross.forward() {
+                            let e = ww + f - mix * (ww + 2.0 * f);
+                            ( Rectangle::new(Point::new(e, 0.0), Size::new((ww - e).max(0.0), size.height)), e - f, true )
+                        } else {
+                            let e = mix * (ww + 2.0 * f) - f;
+                            ( Rectangle::new(Point::new(0.0, 0.0), Size::new(e.max(0.0), size.height)), e, false )
+                        };
+
+                        self.arriving(&mut frame, window, solid, 1.0, r, &han);
+
+                        for i in 0..BANDS {
+                            let x = ramp + i as f32 * fw;
+                            //  Opacity at the middle of the band: 1 beside the solid, 0 at the far end.
+                            let t = (i as f32 + 0.5) / BANDS as f32;
+                            let a = if forward { t } else { 1.0 - t };
+                            let band = Rectangle::new(Point::new(x, 0.0), Size::new(fw, size.height));
+                            self.arriving(&mut frame, window, band, a, r, &han);
+                        }
+                    }
+                }
+            }
         } else {
 
             let (w, h) = match renderer.measure_image(&self.empty_image) {
@@ -1476,7 +1695,7 @@ impl<Message> Program<Message> for QuickViewer {
                 None    => (0.0, 0.0),
             };
 
-            frame.draw_image( self.fit(bounds, w , h), &self.empty_image.clone());
+            frame.draw_image( self.fit(size, w , h), &self.empty_image.clone());
         }
 
         vec![frame.into_geometry()]

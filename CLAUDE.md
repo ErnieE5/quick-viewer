@@ -27,6 +27,7 @@ cargo clippy --all-targets
 - **`heif` feature is ON by default** (`default=["heif"]` in `qv-app/Cargo.toml`). It pulls in `libheif-rs` and, in `main`, calls `libheif_rs::integration::image::register_all_decoding_hooks()` so the `image` crate can decode HEIC. It links the **native libheif** library — setup is machine-specific and recorded exactly in **`HEIF-BUILD.md`** (Windows/vcpkg verified; Linux/pkg-config unverified). Build with `--no-default-features` to omit it; `.heic` files (still in the scan `EXTENSIONS` list) then fail to decode at load time.
 - **iced version swap:** both member `Cargo.toml`s build against crates.io **iced 0.14** but carry commented-out `path = "../../iced"` lines for the local iced **0.15-dev** clone. To switch, comment/uncomment the paired `iced` + `iced_core` lines in *both* crates together.
 - Useful runtime flags (see `qv-app/src/args.rs`): `-F/--fs` fullscreen, `-S` slideshow, `--delay <ms>`, `--cache-size`, `--look-ahead`/`--look-behind`, `--no-canvas` (start in `Image` mode), `--view-exif`, `--ns/--no-splash`, `--max-depth`.
+- Scale and motion flags, named and behaving as ee_feh's: `--scale-mode <Fit|fit|Fill|un>` (case matters: `Fit` fits, `fit` only shrinks), `--fit`, `--fill`; `--wipe [ms]` (the default, 150), `--fade [ms]` (300), `--slide`, `--no-slide` (instant), `--slide-ms`.
 - Window geometry flags, named and behaving as ee_feh's: `--w`/`--h`, `--x`/`--y`, `--b` (trim off the bottom), `--screen <N>`, `--span`, `--overlay` (always-on-top), `--borderless`, and `--list-screens`. Naming **any** of `--x/--y/--w/--h/--b` cancels full screen, exactly as in ee_feh — asking for a size is asking for a window. Values are logical (DPI-scaled) pixels.
 
 ## Architecture
@@ -58,7 +59,8 @@ The single source of truth for "what images exist and where we are."
 
 ### Render modes (`RenderMode`)
 
-- **`Canvas`** (default) — custom `canvas::Program for QuickViewer` impl at the bottom of `viewer.rs`. Manual fit-to-bounds math lives in `fit()` (aspect-preserving, centered). Draws `current_image_handle` or the splash (`empty_image`).
+- **`Canvas`** (default) — custom `canvas::Program for QuickViewer` impl at the bottom of `viewer.rs`. Sizing is `ScaleMode::place()` in `scale.rs` — ee_feh's four scale modes, cycled by Alt+F / Alt+Shift+F. **1:1 means physical pixels**: `place()` takes `px = 1/scale_factor`, and the scale factor arrives as `QVMsg::ScaleFactor` from the window's `Opened`/`Rescaled` events. Draws `current_image_handle` or the splash (`empty_image`, always fitted).
+- **Motions** (`cross.rs`, Alt+S / Alt+Shift+S): instant, fade, wipe, slide — ee_feh's set. Every navigation goes through `move_task()`; slide uses the strip (`strip.rs`), fade/wipe a `Cross` with the departed handle drawn underneath. iced draws a frame's meshes below all its images, so the fade-to-background uses a 1x1 `surface` *image* of the theme colour, not a fill. The slideshow direction is set by the last move (←/→/scroll/`r`), as ee_feh's is.
 - **`Image`** — plain iced image widget (selected at startup via `--no-canvas`).
 - **`Viewer`** — zoomable. **Middle-click emits `QVMsg::Swap`**, which toggles `zoom`, switches `render_mode` to `Viewer` (or back to `config.primary_render`), and **rebuilds the LRU cache from scratch** (allocation vs handle differ between modes).
 

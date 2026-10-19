@@ -37,6 +37,10 @@ pub(crate) struct Binding {
 
 use Chord::{Named,NamedMod,Text,Char,Mouse};
 
+//  Alt+Shift+<letter> may arrive as the letter in either case, depending on the layout;
+//  each such chord is bound both ways.
+const ALT_SHIFT: Modifiers = Modifiers::ALT.union(Modifiers::SHIFT);
+
 pub(crate) const BINDINGS: &[Binding] = &[
     // Navigation
     Binding{ chord:Named(KN::ArrowLeft),          label:"←",            group:"Navigation", help:"previous image",                     msg:Msg::Qv(QVMsg::Left)                    },
@@ -60,12 +64,17 @@ pub(crate) const BINDINGS: &[Binding] = &[
     Binding{ chord:Named(KN::Space),              label:"Space",        group:"Slideshow",  help:"toggle slideshow",                   msg:Msg::Qv(QVMsg::Space)                   },
     Binding{ chord:Text("["),                     label:"[",            group:"Slideshow",  help:"less delay (faster)",                msg:Msg::Qv(QVMsg::DecDelay)                },
     Binding{ chord:Text("]"),                     label:"]",            group:"Slideshow",  help:"more delay (slower)",                msg:Msg::Qv(QVMsg::IncDelay)                },
-    Binding{ chord:Char("s",Modifiers::ALT),      label:"Alt+S",        group:"Slideshow",  help:"cycle direction fwd/rev/random",     msg:Msg::Qv(QVMsg::SlideModeToggle)         },
 
     // Display
     Binding{ chord:Named(KN::F11),                label:"F11",          group:"Display",    help:"toggle fullscreen",                  msg:Msg::FullScreenToggle                   },
     Binding{ chord:Text("f"),                     label:"f",            group:"Display",    help:"toggle fullscreen",                  msg:Msg::FullScreenToggle                   },
     Binding{ chord:Char("b",Modifiers::ALT),      label:"Alt+B",        group:"Display",    help:"toggle borderless",                  msg:Msg::BorderlessToggle                   },
+    Binding{ chord:Char("f",Modifiers::ALT),      label:"Alt+F",        group:"Display",    help:"next scale mode Fit/fit/Fill/un",    msg:Msg::Qv(QVMsg::ScaleModeNext)           },
+    Binding{ chord:Char("F",ALT_SHIFT),           label:"Alt+Shift+F",  group:"Display",    help:"previous scale mode",                msg:Msg::Qv(QVMsg::ScaleModePrev)           },
+    Binding{ chord:Char("f",ALT_SHIFT),           label:"Alt+Shift+F",  group:"Display",    help:"previous scale mode",                msg:Msg::Qv(QVMsg::ScaleModePrev)           },
+    Binding{ chord:Char("s",Modifiers::ALT),      label:"Alt+S",        group:"Display",    help:"next motion instant/fade/wipe/slide",msg:Msg::Qv(QVMsg::MotionNext)              },
+    Binding{ chord:Char("S",ALT_SHIFT),           label:"Alt+Shift+S",  group:"Display",    help:"previous motion",                    msg:Msg::Qv(QVMsg::MotionPrev)              },
+    Binding{ chord:Char("s",ALT_SHIFT),           label:"Alt+Shift+S",  group:"Display",    help:"previous motion",                    msg:Msg::Qv(QVMsg::MotionPrev)              },
     Binding{ chord:Char("e",Modifiers::ALT),      label:"Alt+E",        group:"Display",    help:"toggle EXIF panel",                  msg:Msg::Qv(QVMsg::ExifDisplayToggle)       },
     Binding{ chord:Char("d",Modifiers::ALT),      label:"Alt+D",        group:"Display",    help:"toggle pending-load overlay",        msg:Msg::Qv(QVMsg::LookAheadDisplayToggle)  },
     Binding{ chord:Char("-",Modifiers::CTRL),     label:"Ctrl+-",       group:"Display",    help:"smaller UI text",                    msg:Msg::Qv(QVMsg::FontDown)                },

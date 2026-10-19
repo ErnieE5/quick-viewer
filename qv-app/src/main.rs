@@ -1,6 +1,6 @@
 // #![allow(unused_imports)]
 use ee_conio::{cprintln};
-use ee_viewer::{QuickViewer,QVConfig,QVMsg,RenderMode,SipProgress,FileSystemHelper,ImageKey};
+use ee_viewer::{QuickViewer,QVConfig,QVMsg,RenderMode,SipProgress,FileSystemHelper,ImageKey,Motion,ScaleMode};
 
 mod args;
 #[rustfmt::skip]    // column-aligned geometry tables live in this module
@@ -10,6 +10,10 @@ mod geometry;
 mod keyboard_bindings;
 
 const MIN_DELAY: u64 = 1;
+
+//  One theme, read in two places: iced paints its background behind the canvas, and a
+//  cross fades whatever an image does not cover to that same colour.
+const THEME: Theme = Theme::TokyoNight;
 
 use crate::args::{Args};
 
@@ -93,8 +97,21 @@ impl App {
         config.cache_size           = args.cache_size;
         config.no_empty_cat         = args.no_splash;
         config.slideshow            = args.slideshow;
-        config.slide                = !args.no_slide;
         config.slide_ms             = args.slide_ms;
+        config.fade_ms              = args.fade.unwrap_or(ee_viewer::FADE_MS);
+        config.wipe_ms              = args.wipe.unwrap_or(ee_viewer::WIPE_MS);
+        config.surface              = THEME.palette().background;
+
+        //  ee_feh's order: a timed cross named wins, then a slide said either way, then the wipe.
+        config.motion               = if args.wipe.is_some()    { Motion::Wipe    }
+                                 else if args.fade.is_some()    { Motion::Fade    }
+                                 else if args.slide             { Motion::Slide   }
+                                 else if args.no_slide          { Motion::Instant }
+                                 else                           { Motion::Wipe    };
+
+        config.scale_mode           = if args.fill              { ScaleMode::Fill }
+                                 else if args.fit               { ScaleMode::Fit  }
+                                 else { ScaleMode::parse(&args.scale_mode).expect("clap allows only the four") };
         config.font_size            = args.font_size;
         config.view_exif            = args.view_exif;
         config.delay                = args.delay;
@@ -154,6 +171,15 @@ impl App {
 
             Msg::WindowEvent( (_id,Event::FileDropped(f)) ) => {
                 Task::done(Msg::FileDropped(f))
+            },
+
+            //  The DPI scale: asked for once the window exists, told again when it moves to a
+            //  display with another. 1:1 in the viewer is measured in it.
+            Msg::WindowEvent( (id,Event::Opened{..}) ) => {
+                iced::window::scale_factor(id).map( |f| Msg::Qv(QVMsg::ScaleFactor(f)) )
+            },
+            Msg::WindowEvent( (_id,Event::Rescaled(f)) ) => {
+                self.qv.update( QVMsg::ScaleFactor(f), now ).map(Msg::Qv)
             },
             Msg::WindowEvent( _ ) => { Task::none() },
 
@@ -394,7 +420,7 @@ pub fn main() -> IcedResult {
         App::view
     )
     .window(settings)
-    .theme(Theme::TokyoNight)
+    .theme(THEME)
     .title("Quick Viewer")
     .run()
 }

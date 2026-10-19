@@ -21,11 +21,27 @@ mod toast;
 #[rustfmt::skip]
 mod strip;
 
+#[rustfmt::skip]
+mod scale;
+
+#[rustfmt::skip]
+mod cross;
+
 pub use viewer::{
     QuickViewer,
     QVConfig,
     QVMsg,
     RenderMode,
+};
+
+pub use scale::{
+    ScaleMode,
+};
+
+pub use cross::{
+    Motion,
+    FADE_MS,
+    WIPE_MS,
 };
 
 pub use img_traits::{

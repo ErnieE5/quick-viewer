@@ -64,13 +64,44 @@ pub struct Args {
     #[arg(long,short='S',)]
     pub slideshow: bool,
 
-    /// left/right cut straight to the image instead of sliding it in
+    //  How a step gets to the next image -- instant, fade, wipe or slide -- as ee_feh's
+    //  --fade/--wipe/--slide/--no-slide. A wipe is the default; Alt+S cycles them live.
+
+    /// step by sliding the strip
+    #[arg(long, overrides_with="no_slide")]
+    pub slide: bool,
+
+    /// step by landing on the image at once: no motion
     #[arg(long)]
     pub no_slide: bool,
 
-    /// how long a left/right slide takes, in milliseconds
+    /// how long a slide takes, in milliseconds
     #[arg(long, value_name="MS", default_value_t=400, value_parser=clap::value_parser!(u64).range(1..=10_000))]
     pub slide_ms: u64,
+
+    /// step by dissolving the new image in over <MS> (300 when bare)
+    #[arg(long, value_name="MS", num_args=0..=1, default_missing_value="300", value_parser=clap::value_parser!(u64).range(1..=10_000))]
+    pub fade: Option<u64>,
+
+    /// step by sweeping a soft edge across over <MS> (150 when bare); the default
+    #[arg(long, value_name="MS", num_args=0..=1, default_missing_value="150", value_parser=clap::value_parser!(u64).range(1..=10_000))]
+    pub wipe: Option<u64>,
+
+    //  How an image is sized into the window, as ee_feh's --scale-mode/--fit/--fill.
+    //  Alt+F cycles them live. 1:1 is one image pixel to one screen pixel.
+
+    /// Fit: fit the window, scaling small images up. fit: shrink large images only, else 1:1.
+    /// Fill: cover the window, cropping. un: 1:1 always
+    #[arg(long, value_name="MODE", default_value="Fit", value_parser=["Fit","fit","Fill","un"])]
+    pub scale_mode: String,
+
+    /// --scale-mode Fit
+    #[arg(long, conflicts_with_all=["fill"])]
+    pub fit: bool,
+
+    /// --scale-mode Fill
+    #[arg(long)]
+    pub fill: bool,
 
     /// delay to advance a slideshow in milliseconds
     #[arg(long,value_name="DELAY", default_value_t=1000, value_parser=clap::value_parser!(u64).range(crate::MIN_DELAY..86_400_00))]
