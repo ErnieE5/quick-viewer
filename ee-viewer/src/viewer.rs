@@ -16,6 +16,7 @@ use crate::img_list::{ImageList};
 use crate::strip::{Strip};
 use crate::scale::{ScaleMode};
 use crate::cross::{Cross,Motion};
+use crate::zoom::{zoom};
 
 
 use iced::mouse::{ ScrollDelta };
@@ -49,7 +50,7 @@ use iced::widget::{
     image as iced_image,
     row,
     text,
-    image::viewer,
+    // image::viewer,             // replaced by zoom.rs: iced's viewer cannot see the scale factor
 };
 
 use iced::{
@@ -1447,7 +1448,7 @@ impl QuickViewer {
         };
 
         let img = match self.render_mode {
-            RenderMode::Viewer => container( viewer(h)      .width(Fill).height(Fill) ),
+            RenderMode::Viewer => container( zoom(h, self.px(), self.scale_mode).width(Fill).height(Fill) ),
             RenderMode::Image  => container( iced_image(h)  .width(Fill).height(Fill) ),
             RenderMode::Canvas => container( canvas(self)   .width(Fill).height(Fill) ),
         };
@@ -1525,7 +1526,7 @@ use iced::{ Rectangle, Size, Point, };
 use iced_core::image::Renderer as CoreRenderer;
 use iced_core::image::Image as CoreImage;
 
-//  A wipe's soft edge, as a share of the window's width -- ee_feh's _feather -- and how
+//  A wipe's soft edge, as a share of the width it sweeps -- ee_feh's _feather -- and how
 //  many steps of opacity draw it. The canvas has no gradient mask for an image, so the
 //  ramp is bands, each clipped and drawn at its own opacity.
 const FEATHER:  f32 = 0.12;
@@ -1660,18 +1661,26 @@ impl<Message> Program<Message> for QuickViewer {
                         //  the new image is to the right on the strip, so it comes in from the
                         //  right; back, from the left. The edge starts wholly off one side and
                         //  ends wholly off the other.
+                        //
+                        //  The sweep spans the two images, not the window -- here ee_feh is not
+                        //  followed. Across the window, a portrait image full screen got ~60ms
+                        //  of a 150ms wipe: 4 frames at 60Hz, 530px apart, which reads as a cut.
+                        //  Outside the images both sides are the background, so nothing is lost.
                         let ww = size.width;
-                        let f  = ww * FEATHER;
+                        let x0 = r.x.min(dr.x).max(0.0);
+                        let x1 = (r.x + r.width).max(dr.x + dr.width).min(ww);
+                        let sw = (x1 - x0).max(1.0);
+                        let f  = sw * FEATHER;
                         let fw = f / BANDS as f32;
 
                         //  `solid` is where the arriving image is wholly in; the ramp is the
                         //  feather beside it, from `ramp` for one feather, fading to nothing
                         //  away from the solid side.
                         let (solid, ramp, forward) = if self.cross.forward() {
-                            let e = ww + f - mix * (ww + 2.0 * f);
+                            let e = x0 + sw + f - mix * (sw + 2.0 * f);
                             ( Rectangle::new(Point::new(e, 0.0), Size::new((ww - e).max(0.0), size.height)), e - f, true )
                         } else {
-                            let e = mix * (ww + 2.0 * f) - f;
+                            let e = x0 + mix * (sw + 2.0 * f) - f;
                             ( Rectangle::new(Point::new(0.0, 0.0), Size::new(e.max(0.0), size.height)), e, false )
                         };
 

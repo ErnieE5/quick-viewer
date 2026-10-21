@@ -27,6 +27,9 @@ mod scale;
 #[rustfmt::skip]
 mod cross;
 
+#[rustfmt::skip]
+mod zoom;
+
 pub use viewer::{
     QuickViewer,
     QVConfig,

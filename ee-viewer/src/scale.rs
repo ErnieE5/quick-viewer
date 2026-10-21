@@ -61,21 +61,21 @@ impl ScaleMode {
         let rw = bounds.width  / w;
         let rh = bounds.height / h;
 
-        let (q, one_to_one) = match self {
-            ScaleMode::Fit                  => ( scaled(w, h, rw.min(rh)), false ),
-            ScaleMode::Fill                 => ( scaled(w, h, rw.max(rh)), false ),
-            ScaleMode::Shrink   if !fits    => ( scaled(w, h, rw.min(rh)), false ),
+        let q = match self {
+            ScaleMode::Fit                  => scaled(w, h, rw.min(rh)),
+            ScaleMode::Fill                 => scaled(w, h, rw.max(rh)),
+            ScaleMode::Shrink   if !fits    => scaled(w, h, rw.min(rh)),
             ScaleMode::Shrink   |
-            ScaleMode::Unscaled             => ( native,                   true  ),
+            ScaleMode::Unscaled             => native,
         };
 
-        let mut x = (bounds.width  - q.width ) / 2.0;
-        let mut y = (bounds.height - q.height) / 2.0;
+        //  Every edge on a whole physical pixel, scaled or not: an edge between two pixels
+        //  is drawn half into each, a soft line no one asked for.
+        let grid = |v: f32| (v / px).round() * px;
+        let q    = Size::new(grid(q.width), grid(q.height));
 
-        if one_to_one {
-            x = (x / px).round() * px;
-            y = (y / px).round() * px;
-        }
+        let x = grid((bounds.width  - q.width ) / 2.0);
+        let y = grid((bounds.height - q.height) / 2.0);
 
         Rectangle::new(Point::new(x, y), q)
     }
@@ -149,6 +149,23 @@ mod tests {
         //  1200 px wide fits a 1000-logical window at 150% (800 logical) and is left 1:1.
         let r = ScaleMode::Shrink.place(WIN, 1200.0, 600.0, 1.0 / 1.5);
         assert!((r.width - 800.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn scaled_images_land_on_the_physical_grid_too() {
+        //  2000 x 3000 fitted into 1707 x 960 logical at 150%: 640 logical wide is 960
+        //  physical, but the centre and the odd sizes fall between pixels unless snapped.
+        let px  = 1.0 / 1.5;
+        let win = Size::new(2561.0 * px, 1439.0 * px);
+        for m in SEQ {
+            for (w, h) in [ (2000.0, 3000.0), (333.0, 777.0), (5001.0, 1003.0) ] {
+                let r = m.place(win, w, h, px);
+                for v in [ r.x, r.y, r.width, r.height ] {
+                    let g = v / px;
+                    assert!((g - g.round()).abs() < 1e-2, "{m:?} {w}x{h}: {v} is {g} physical");
+                }
+            }
+        }
     }
 
     #[test]
