@@ -79,6 +79,7 @@ impl FileSystemImage {
         } )
     }
 
+    #[allow(unused)]
     pub fn from_path(provider:&str,file:&Path) -> Result<FileSystemImage,ImageError>
     {
         let source_path = match dunce::canonicalize(&file) {
@@ -104,6 +105,55 @@ impl FileSystemImage {
             source_path,
             size,
             ftime:      ftime.into(),
+        } )
+    }
+
+    //  from_path with the stat already in hand, and no canonicalize for a path that is
+    //  already absolute: over SMB each of those is another round trip per file.
+    pub fn from_meta(provider:&str,file:&Path,meta:&std::fs::Metadata) -> Result<FileSystemImage,ImageError>
+    {
+        let source_path = if file.is_absolute() { file.to_path_buf() } else {
+            match dunce::canonicalize(&file) {
+                Ok(p)  => p,
+                Err(_) => { return Err(ImageError::Unexpected); }
+            }
+        };
+
+        let name = match file.file_name() {
+            Some(r)   => r.display().to_string(),
+            None      => { return Err(ImageError::Unexpected); }
+        };
+
+        let ftime = meta.created().unwrap_or_else(|_| std::time::SystemTime::now());
+
+        Ok( FileSystemImage {
+            provider:   provider.to_string(),
+            origin:     "".into(),
+            group:      "".into(),
+            name,
+            source_path,
+            size:       meta.len(),
+            ftime:      ftime.into(),
+        } )
+    }
+
+    //  --no-check: take the path on trust and touch nothing on disk. Size and time are
+    //  unknown, so the size and date sorts have nothing to go on for these.
+    pub fn from_trusted(provider:&str,file:&Path) -> Result<FileSystemImage,ImageError>
+    {
+        let name = match file.file_name() {
+            Some(r)   => r.display().to_string(),
+            None      => { return Err(ImageError::Unexpected); }
+        };
+
+        Ok( FileSystemImage {
+            provider:   provider.to_string(),
+            origin:     "".into(),
+            group:      "".into(),
+            name,
+            source_path:file.to_path_buf(),
+            size:       0,
+            ftime:      std::time::SystemTime::UNIX_EPOCH.into(),
         } )
     }
 

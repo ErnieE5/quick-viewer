@@ -158,6 +158,23 @@ pub struct Args {
     pub no_canvas: bool,
 
 
+    //  A list of files from somewhere else, as ee_feh's --file-list/--file-temp/--no-check.
+    //  One path per line, kept in the file's order, appended after FILES/DIRS. A list too
+    //  long for the command line (Windows stops near 32k characters) goes this way.
+
+    /// read the files to show from <FILE>, one per line, in that order
+    #[arg(long, value_name="FILE", conflicts_with="file_temp")]
+    pub file_list: Option<String>,
+
+    /// as --file-list, then delete <FILE>
+    #[arg(long, value_name="FILE")]
+    pub file_temp: Option<String>,
+
+    /// trust the list: don't check that each file exists
+    #[arg(long)]
+    pub no_check: bool,
+
+
     /// List of files and/or directories
     #[arg(value_name="FILES/DIRS", default_values_t = vec![String::from(".")])]
     pub dirs: Vec<String>,
@@ -165,5 +182,34 @@ pub struct Args {
 
 
 pub fn do_args() -> Args {
-    Args::parse()
+    use clap::{CommandFactory,FromArgMatches};
+    use clap::parser::ValueSource;
+
+    let matches  = Args::command().get_matches();
+    let mut args = Args::from_arg_matches(&matches).unwrap_or_else( |e| e.exit() );
+
+    let list = match (&args.file_list,&args.file_temp) {
+        (Some(f),_) | (None,Some(f)) => f.clone(),
+        (None,None)                  => return args,
+    };
+
+    let text = match std::fs::read_to_string(&list) {
+        Ok(t)  => t,
+        Err(e) => { eprintln!("qv: can't read the list {list}: {e}"); std::process::exit(2); }
+    };
+
+    //  The "." default is for a bare `qv`; a list replaces it rather than joining it.
+    if matches.value_source("dirs") == Some(ValueSource::DefaultValue) {
+        args.dirs.clear();
+    }
+
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+
+    args.dirs.extend( text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from) );
+
+    if args.file_temp.is_some() {
+        if let Err(e) = std::fs::remove_file(&list) { eprintln!("qv: can't delete the list {list}: {e}"); }
+    }
+
+    args
 }

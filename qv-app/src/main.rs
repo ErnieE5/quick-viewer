@@ -187,7 +187,7 @@ impl App {
                 cprintln!("{:?}~[c51]{} ",now,f.display());
 
                 let (m,h) = Task::sip(
-                    FileSystemHelper::find_files_sipper(vec![f.display().to_string()],self.args.max_depth),
+                    FileSystemHelper::find_files_sipper(vec![f.display().to_string()],self.args.max_depth,true),
                     Msg::FindFilesProgress,
                     | _e | { Msg::FileFindComplete }
                 ).abortable();
@@ -243,7 +243,7 @@ impl App {
 
             Msg::FindFilesOnPath => {
                 let (m,h) = Task::sip(
-                    FileSystemHelper::find_files_sipper(self.args.dirs.clone(),self.args.max_depth),
+                    FileSystemHelper::find_files_sipper(self.args.dirs.clone(),self.args.max_depth,!self.args.no_check),
                     Msg::FindFilesProgress,
                     | _e | { Msg::FileFindComplete }
                 ).abortable();

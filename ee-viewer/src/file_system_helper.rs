@@ -151,7 +151,9 @@ fn drain(items:& mut FsiVec) -> SipProgress {
 
 impl FileSystemHelper {
 
-    pub fn find_files_sipper(args: Vec<String>,max_depth:usize) -> impl Straw<(), SipProgress, ImageError> {
+    //  `check` false is --no-check: a named file with an image extension is taken on trust,
+    //  with no round trip to the disk -- over SMB that is most of the cost of a long list.
+    pub fn find_files_sipper(args: Vec<String>,max_depth:usize,check:bool) -> impl Straw<(), SipProgress, ImageError> {
         sipper(async move |mut progress| {
 
             let mut items:FsiVec = VecDeque::new();
@@ -162,10 +164,48 @@ impl FileSystemHelper {
 
             let mut dirs:DirGlob = Vec::new();
 
+            //  Named files go out in batches, in the order given (a --file-list's order is
+            //  deliberate), so the first shows while a long list is still being checked.
+            let mut sent:usize = 0;
+
+            let trusted = |dir:&str| -> bool {
+                !check && !dir.contains(['*','?','['])
+                       && std::path::Path::new(dir).extension().and_then(|e| e.to_str()).is_some_and(|e| EXTENSIONS.contains(&e))
+            };
+
+            //  One stat per path, STATS_AT_ONCE in flight, handed back in the order given. Over
+            //  SMB a stat is a round trip (~7 ms here), so 1,104 of them one after another was
+            //  most of 18 s; in flight together they overlap.
+            const STATS_AT_ONCE: usize = 32;
+
+            use iced::futures::StreamExt;
+
+            let mut stats = iced::futures::stream::iter( args.clone() ).map( |dir| {
+                let skip = trusted(&dir);
+                tokio::task::spawn_blocking( move || if skip { None } else { Some( std::fs::metadata(&dir) ) } )
+            }).buffered(STATS_AT_ONCE);
+
             for dir in &args {
                 let path = PathBuf::from(&dir);
 
-                if dir.contains(['*','?','[']) {
+                let meta = stats.next().await.expect("one stat per arg").expect("stat task panicked");
+
+                if !items.is_empty() && items.len() > match sent { 0 => 0, 1..100 => 98, _ => 99 } {
+                    sent += items.len();
+                    progress.send( drain(& mut items) ).await;
+                }
+
+                let globbed = dir.contains(['*','?','[']);
+
+                if trusted(dir) {
+                    match FileSystemImage::from_trusted("cl", path.as_path() ) {
+                        Ok(i)  => { items.push_back( i ) },
+                        Err(e) => { ee_conio::cprintln!("~[c196]{e:?} ~[c7]{dir}"); }
+                    }
+                    continue;
+                }
+
+                if globbed {
                     let mut pb_root  = PathBuf::new();
                     let mut pb_match = PathBuf::new();
                     let mut got_root = false;
@@ -192,14 +232,19 @@ impl FileSystemHelper {
                     dirs.push( ( pb_root, Some(glob) ) );
                 }
 
-                if path.is_dir() {
-                    dirs.push( ( dir.into(), None ) );
-                }
-                else if path.is_file() {
-                    match FileSystemImage::from_path("cl", path.as_path() ) {
-                        Ok(i)  => { items.push_back( i ) },
-                        Err(e) => { ee_conio::cprintln!("{e:?}"); continue; }
+                match meta.expect("only trusted paths go unstatted") {
+                    Ok(m) if m.is_dir() => {
+                        dirs.push( ( dir.into(), None ) );
                     }
+                    Ok(m) if m.is_file() => {
+                        match FileSystemImage::from_meta("cl", path.as_path(), &m ) {
+                            Ok(i)  => { items.push_back( i ) },
+                            Err(e) => { ee_conio::cprintln!("~[c196]{e:?} ~[c7]{dir}"); continue; }
+                        }
+                    }
+                    Ok(_)               => { }
+                    Err(e) if !globbed  => { ee_conio::cprintln!("~[c196]skipped ~[c7]{dir}: {e}"); }
+                    Err(_)              => { }
                 }
             }
 
@@ -288,4 +333,46 @@ impl FileSystemHelper {
         })
     }
 
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::task::Sipper;
+
+    //  The names that come out of the sipper, in the order they come out.
+    fn sip_names(args:Vec<String>,check:bool) -> Vec<String> {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on( async {
+            let mut names = Vec::new();
+            let mut s = FileSystemHelper::find_files_sipper(args,1,check).pin();
+            while let Some(p) = s.sip().await {
+                if let SipProgress::SomeFiles(l) = p { names.extend( l.iter().map(|i| i.name().to_string()) ); }
+            }
+            names
+        })
+    }
+
+    //  A list out of alphabetical order, with a file missing from the middle of it: the
+    //  order holds and the missing one is dropped, not fatal. Unchecked, nothing is dropped.
+    #[test]
+    fn named_files_keep_their_order() {
+        let dir = std::env::temp_dir().join(format!("qv-file-list-{}",std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let order:Vec<String> = (0..250).rev().map(|n| format!("img_{n:03}.jpg")).collect();
+        for n in &order { std::fs::write(dir.join(n),b"").unwrap(); }
+
+        let mut args:Vec<String> = order.iter().map(|n| dir.join(n).display().to_string()).collect();
+        args.insert(100, dir.join("missing.jpg").display().to_string());
+
+        assert_eq!( sip_names(args.clone(),true), order );
+
+        let mut trusted = order.clone();
+        trusted.insert(100,"missing.jpg".into());
+        assert_eq!( sip_names(args,false), trusted );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
